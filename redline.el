@@ -2,8 +2,8 @@
 
 ;; Copyright (C) 2026 Stephen Lloyd Webber
 
-;; Author: Stephen Lloyd Webber <stephen@slwebber.com>
-;; Maintainer: Stephen Lloyd Webber <stephen@slwebber.com>
+;; Author: Stephen Lloyd Webber <offgridauthor@gmail.com>
+;; Maintainer: Stephen Lloyd Webber <offgridauthor@gmail.com>
 ;; URL: https://github.com/offgridauthor/redline
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1") (cm-mode "1.10"))

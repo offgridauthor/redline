@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2026 Stephen Lloyd Webber
 
-;; Author: Stephen Lloyd Webber <stephen@slwebber.com>
+;; Author: Stephen Lloyd Webber <offgridauthor@gmail.com>
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;; This file is not part of GNU Emacs.
