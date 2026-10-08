@@ -4,6 +4,9 @@
 
 First release.
 
+- =C-c * c= comments on a region that crosses paragraphs or other changes, as a run of highlights that exports as one Word comment over the whole passage.  On a comment, it adds a reply instead of refusing.
+- Comments in the same paragraph no longer show as an org-modern target (grey box and ↪).
+
 - Import a .docx as org with CriticMarkup, including comment threads, resolved comments, and inline objects.
 - Export back to a copy of the original as real Word tracked changes, keeping the author's formatting.
 - =redline-mode=: tracking on in files from Word, review pane with accept, reject, resolve, and delete, margin author tags, clean view, replies.

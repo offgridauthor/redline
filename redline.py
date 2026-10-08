@@ -71,6 +71,11 @@ def w(tag: str) -> str:
 PARA_SEP = " ¶ "          # paragraph break inside a comment
 BR = "\n"                  # a w:br inside a paragraph (org: \\ at line end)
 OBJ = "\ufffc"             # stands for one inline object in a paragraph
+# Private markers for comments whose range spans paragraphs or other
+# markup.  They exist only between reading the org and writing the XML.
+SEP = "\ue020"             # breaks a comment chain; adds no text
+OPEN = "\ue021"            # {>>OPEN key<<}: where a spanning comment starts
+SPAN = "\ue022"            # {>>@A SPAN key SPAN text<<}: the comment it belongs to
 LINK_ANY = re.compile(r"\[\[docx:([0-9]+\.[0-9]+)\](?:\[(.*?)\])?\]", re.S)
 LINK = re.compile(r"\[\[docx:([0-9]+\.[0-9]+)\](?:\[(.*?)\])?\]", re.S)
 
@@ -107,6 +112,8 @@ class Comment:
     point: bool = False            # anchored at `start` with no range
     replies: list = field(default_factory=list)
     base_id: Optional[str] = None  # import side: id in the original comments.xml
+    opener: Optional[str] = None   # export side: marks where comment `span` starts
+    span: Optional[str] = None     # export side: key of this comment's opener
 
 
 @dataclass
@@ -715,14 +722,19 @@ def parse_para(text: str, me: Optional[str]) -> Para:
     def add(s, chg=None, author=None):
         start, pos = len(chars), 0
         for m in re.finditer("\ue000([0-9]+)\ue001", s):
-            for c in flat(s[pos:m.start()]):
+            for c in flat(s[pos:m.start()]).replace(SEP, ""):
                 chars.append(Ch(c, chg, author))
             lk = links[int(m.group(1))]
             chars.append(Ch(OBJ, chg, author, obj=lk.group(1), desc=strip_markup(lk.group(2) or "")))
             pos = m.end()
-        for c in flat(s[pos:]):
+        for c in flat(s[pos:]).replace(SEP, ""):
             chars.append(Ch(c, chg, author))
         return start, len(chars)
+
+    def take_span(c):
+        m = re.match(SPAN + r"(\w+)" + SPAN + r"\s*", c.text)
+        if m:
+            c.span, c.text = m.group(1), c.text[m.end():]
 
     k = 0
     while k < len(toks):
@@ -740,6 +752,9 @@ def parse_para(text: str, me: Optional[str]) -> Para:
             chain.insert(0, split_comment(val.group("cm")))
             c0 = Comment(chain[0][0], chain[0][1], len(chars), len(chars), True)
             c0.replies = [Comment(a, t) for a, t in chain[1:]]
+            if c0.text.startswith(OPEN):
+                c0.opener, c0.replies = c0.text[1:], []
+            take_span(c0)
             comments.append(c0)
             continue
         if kind == "hl":
@@ -758,6 +773,7 @@ def parse_para(text: str, me: Optional[str]) -> Para:
         if said:
             root = Comment(said[0][0], said[0][1], s, e, s == e)
             root.replies = [Comment(a, t) for a, t in said[1:]]
+            take_span(root)
             comments.append(root)
 
     # Emphasis: toggle on / and * at org-style boundaries, then drop the
@@ -806,8 +822,113 @@ def has_closer(chars, idx) -> bool:
     return False
 
 
+GAP = re.compile(r"(?:\s|(?m:^\*+[ \t]))*")
+MARKUP_OPEN = re.compile(r"\{(?:\+\+|--|~~|==|>>)")
+
+
+def chain_after(body: str, pos: int) -> int:
+    """End of the comment chain that starts at POS (POS if there's none)."""
+    while body.startswith("{>>", pos):
+        e = body.find("<<}", pos)
+        if e < 0:
+            break
+        pos = e + 3
+    return pos
+
+
+def fragment_highlights(body: str) -> str:
+    """Rewrite highlights org can't carry as one span, the way redline does.
+
+    {==A {++x++} B==}{>>c<<} and highlights across paragraphs become runs
+    of plain highlights ({==A ==}{++x++}{== B==}{>>c<<}); the comment
+    belongs to the whole run.  One with no comment loses its braces.
+    """
+    out, last = [], 0
+    for m in TOKEN.finditer(body):
+        inner = m.group("hl")
+        if inner is None or not (MARKUP_OPEN.search(inner) or re.search(r"\n[ \t]*\n", inner)):
+            continue
+        out.append(body[last:m.start()])
+        last = m.end()
+        if not body.startswith("{>>", m.end()):
+            out.append(inner)
+            continue
+        pieces, pos = [], 0
+        for t in TOKEN.finditer(inner):
+            pieces += [("text", inner[pos:t.start()]), ("tok", t.group(0))]
+            pos = t.end()
+        pieces.append(("text", inner[pos:]))
+        frag, ends_plain = [], False
+        for kind, txt in pieces:
+            if kind == "tok":
+                frag.append(txt)
+                ends_plain = False
+                continue
+            for i, part in enumerate(re.split(r"(\n[ \t]*\n+(?:\*+[ \t]+)?)", txt)):
+                if i % 2 or not part.strip():
+                    frag.append(part)
+                    ends_plain = ends_plain and not part
+                    continue
+                lead = len(part) - len(part.lstrip())
+                tail = len(part.rstrip())
+                frag.append(part[:lead] + "{==" + part[lead:tail] + "==}" + part[tail:])
+                ends_plain = not part[tail:]
+        if not ends_plain:
+            frag.append("{====}")                  # something for the comment to hang on
+        out.append("".join(frag))
+    out.append(body[last:])
+    return "".join(out)
+
+
+def join_highlights(body: str) -> str:
+    """Mark runs of highlights that share one comment.
+
+    A highlight with no comment of its own belongs to the next commented
+    highlight, when only markup, blank lines, or heading stars come
+    between.  The run's first piece gets an opener; the comment gets
+    its key, and the XML writer stretches the comment's range back to
+    the opener.
+    """
+    body = fragment_highlights(body)
+    toks = list(TOKEN.finditer(body))
+    edits, run, cursor, n = [], [], 0, 0
+
+    def gap_ok(a, b):
+        return GAP.fullmatch(TOKEN.sub("", body[a:b])) is not None
+
+    for t in toks:
+        if t.group("hl") is None:
+            continue
+        if run and not gap_ok(cursor, t.start()):
+            run = []
+        has_chain = body.startswith("{>>", t.end())
+        if not has_chain:
+            run.append(t)
+            cursor = t.end()
+            continue
+        if run:
+            n += 1
+            key = f"s{n}"
+            first = run[0]
+            edits.append((first.start(), first.end(),
+                           SEP + "{>>" + OPEN + key + "<<}" + SEP + first.group("hl")))
+            for r in run[1:]:
+                edits.append((r.start(), r.end(), r.group("hl")))
+            c = t.end() + 3                        # inside the first {>>
+            am = re.match(r"@\S+[ \t]*", body[c:])
+            c += am.end() if am else 0
+            edits.append((c, c, SPAN + key + SPAN + " "))
+            if t.group("hl") == "":                # the {====} stand-in: a point
+                edits.append((t.start(), t.end(), SEP))
+        run, cursor = [], chain_after(body, t.end())
+    for a, b, txt in sorted(edits, reverse=True):
+        body = body[:a] + txt + body[b:]
+    return body
+
+
 def org_blocks(body: str):
     """Split org body into paragraph strings on blank lines outside markup."""
+    body = join_highlights(body)
     spans = [(m.start(), m.end(), m) for m in TOKEN.finditer(body)]
     # Comments containing blank lines keep their paragraphs as ¶.
     out, last = [], 0
@@ -922,6 +1043,8 @@ class Exporter:
         ids = [int(x) for x in base.doc.xpath("//w:*/@w:id", namespaces={"w": W_NS}) if x.lstrip("-").isdigit()]
         self.next_change = max(ids + [0]) + 1000
         self.next_comment = max([int(c) for c in base.comments if c.isdigit()] + [0]) + 1
+        self.openers = {}                          # span key -> placeholder range starts
+        self.spans = {}                            # span key -> ids of the comment and replies
         self.base_index = {id(el): k for k, el in enumerate(base.body)}
         self.used_base = set()
         self.out_comments = []                     # (id, author, initials, date, text, parent_id, base_el)
@@ -951,6 +1074,23 @@ class Exporter:
         initials = "".join(x[0] for x in full.split()).upper() or None
         self.out_comments.append((cid, full, initials, self.stamp, text, parent_id, None, done))
         return cid
+
+    def stretch_spans(self):
+        """Point each opener at its comment, so the range starts there.
+
+        clean_marks keeps the first start of each id, which is the opener's.
+        """
+        for key, els in self.openers.items():
+            group = self.spans.get(key)
+            for el in els:
+                if not group:
+                    el.getparent().remove(el)
+                    continue
+                el.set(w("id"), group[0])
+                for cid in reversed(group[1:]):
+                    extra = etree.Element(w("commentRangeStart"))
+                    extra.set(w("id"), cid)
+                    el.addnext(extra)
 
     def keep_base(self, c: Comment, parent_id=None):
         """A comment inside a paragraph copied verbatim keeps its id."""
@@ -1053,11 +1193,16 @@ class Exporter:
             dates.append(date)
 
         # Comment ids, and where their marks go.
-        starts, ends, pts = {}, {}, {}
+        starts, ends, pts, opens = {}, {}, {}, {}
         for c in para.comments:
+            if c.opener:
+                opens.setdefault(c.start, []).append(c.opener)
+                continue
             cid = self.comment_id(c)
             reply_ids = [self.comment_id(r, cid) for r in c.replies]
             group = [cid] + reply_ids
+            if c.span:
+                self.spans[c.span] = group
             if c.point or c.end <= c.start:
                 pts.setdefault(c.start, []).extend(group)
             else:
@@ -1065,7 +1210,7 @@ class Exporter:
                 ends.setdefault(c.end, []).extend(group)
 
         n = len(para.chars)
-        cuts = sorted({0, n} | set(starts) | set(ends) | set(pts) | set(marks_at))
+        cuts = sorted({0, n} | set(starts) | set(ends) | set(pts) | set(opens) | set(marks_at))
         wrapper, wrap_key = None, None
         for pos in range(n + 1):
             if pos in cuts:
@@ -1081,6 +1226,8 @@ class Exporter:
                     self.ref_run(p, cid)
                 for cid in starts.get(pos, []):
                     etree.SubElement(p, w("commentRangeStart")).set(w("id"), cid)
+                for key in opens.get(pos, []):
+                    self.openers.setdefault(key, []).append(etree.SubElement(p, w("commentRangeStart")))
             if pos == n:
                 break
             c = para.chars[pos]
@@ -1469,6 +1616,7 @@ def cmd_export(args):
         base.body.append(sect)
     for r in base.body.iter(w("r")):
         r.attrib.pop("_k", None)
+    ex.stretch_spans()
     clean_marks(base.body, {c[0] for c in ex.out_comments}, set(base.comments))
 
     xml = lambda el: etree.tostring(el, xml_declaration=True, encoding="UTF-8", standalone=True)

@@ -148,6 +148,37 @@ def test_never_overwrites(tmp):
     assert r.returncode and "refusing" in r.stderr
 
 
+def test_comment_spans(tmp):
+    """Comments over several paragraphs, or over other changes, keep their range."""
+    src = os.path.join(tmp, "span.docx")
+    doc = Document()
+    for t in ("First one here.", "Second one here.", "Third one here."):
+        doc.add_paragraph(t)
+    doc.save(src)
+    run("import", src, "--me", ME)
+    org = src[:-5] + ".org"
+    text = open(org, encoding="utf-8").read()
+    # The run redline-comment makes, and the run cm-mode makes by hand.
+    text = text.replace("First one here.\n\nSecond one",
+                        "First {==one here.==}\n\n{==Second==}{>>@SLW across<<} one")
+    text = text.replace("Third one here.",
+                        "{==Third {++new ++}{>>@SLW<<}one==}{>>@SLW over a change<<} here.")
+    open(org, "w", encoding="utf-8").write(text)
+    out = os.path.join(tmp, "span-out.docx")
+    run("export", org, "-o", out, "--me", ME)
+    xml = zipfile.ZipFile(out).read("word/document.xml").decode()
+    flat = re.sub(r"<w:commentRange(Start|End) w:id=\"(\d+)\"/>", r"[\1\2]", xml)
+    flat = re.sub(r"</w:p>", "\n", flat)
+    flat = re.sub(r"<w:delText[^>]*>.*?</w:delText>|<[^>]+>", "", flat)
+    assert "{" not in flat and not re.search("[\ue000-\ue0ff]", flat), flat
+    paras = [p for p in flat.splitlines() if p.strip()]
+    m = re.search(r"\[Start(\d+)\]one here\.", paras[0])
+    assert m, paras[0]
+    assert re.match(rf"Second\[End{m.group(1)}\]", paras[1]), paras[1]
+    assert re.match(r"\[Start(\d+)\]Third new one\[End\1\] here\.", paras[2]), paras[2]
+    assert xml.count("<w:commentRangeStart ") == 2
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):

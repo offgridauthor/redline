@@ -185,6 +185,7 @@ written over."
 
 (defvar-keymap redline-mode-map
   :doc "Keys for `redline-mode', beside cm-mode's own under C-c *."
+  "C-c * c" #'redline-comment
   "C-c * l" #'redline-pane
   "C-c * h" #'redline-toggle-clean-view
   "C-c * r" #'redline-reply
@@ -192,6 +193,35 @@ written over."
   "C-c * o" #'redline-import
   "C-c * w" #'redline-export
   "<right-margin> <mouse-1>" #'redline-margin-click)
+
+;;;; Org targets
+
+;; Two comments in one paragraph, {>>a<<} ... {>>b<<}, contain
+;; "<<} ... {>>", which org reads as a <<target>>.  org-modern then
+;; draws the stretch between as a grey box with a ↪.  Redline buffers
+;; use a target pattern that won't start at } or end at {.
+
+(defvar org-modern-internal-target)
+(defvar org-modern-mode)
+(declare-function org-modern-mode "ext:org-modern" (&optional arg))
+
+(defconst redline--org-target-regexp
+  (let ((edge "[^<>{}\n\r \t]"))
+    (format "<<\\(%s\\|%s[^<>\n\r]*%s\\)>>" edge edge edge))
+  "Org's target pattern, minus the ones CriticMarkup comments make.")
+
+(defun redline--quiet-org-targets (on)
+  "Keep org (and org-modern) from reading comments as targets.
+ON non-nil starts that in this buffer; nil puts things back."
+  (if on
+      (setq-local org-target-regexp redline--org-target-regexp
+                  org-modern-internal-target nil)
+    (kill-local-variable 'org-target-regexp)
+    (kill-local-variable 'org-modern-internal-target))
+  ;; org-modern reads its settings when it starts in a buffer.
+  (when (bound-and-true-p org-modern-mode)
+    (org-modern-mode -1)
+    (org-modern-mode 1)))
 
 ;;;###autoload
 (define-minor-mode redline-mode
@@ -208,11 +238,13 @@ Tracked changes, comment threads, a review pane, margin tags, and
         (when redline-style-cm-faces (redline-apply-faces))
         ;; "<<}{>>" between two comments reads to org as a <<target>>.
         (face-remap-add-relative 'org-target '(:underline nil))
+        (redline--quiet-org-targets t)
         (redline-pane-setup)
         (when (and redline-track-changes-on-open
                    (redline-docx-file-p)
                    (not cm-follow-changes-mode))
           (cm-follow-changes-mode 1)))
+    (redline--quiet-org-targets nil)
     (redline-pane-teardown)))
 
 (defconst redline--markup-re

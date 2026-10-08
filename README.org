@@ -50,18 +50,33 @@ Word labels each change with whatever name that copy of Word had for you, so ear
 
 * Keys
 
-cm-mode's own keys work as usual under =C-c *=: =F= turns tracking on and off, =c= adds a comment, =i= accepts or rejects the change at point, =t= changes who you are. redline adds:
+cm-mode's own keys work as usual under =C-c *=: =F= turns tracking on and off, =i= accepts or rejects the change at point, =t= changes who you are. redline adds or improves:
 
 | Key       | Does                                                         |
 |-----------+--------------------------------------------------------------|
 | =C-c * l= | Review pane                                                  |
 | =C-c * h= | Clean view on or off                                         |
 | =C-c * r= | Reply to the comment thread at point                         |
+| =C-c * c= | Comment on the region, or at point (on a comment: reply)     |
 | =C-c * k= | Delete just the one comment at point                         |
 | =C-c * o= | Open a .docx                                                 |
 | =C-c * w= | Export to .docx                                              |
 
 In the review pane: =RET= jumps to the text, =a= / =r= accept or reject, =c= marks a thread resolved, =k= deletes a thread, =A= / =R= accept or reject everything, =g= refreshes.
+
+* Comments over a long passage
+
+CriticMarkup can't nest one piece of markup inside another, so a comment on a passage that crosses paragraphs or other changes can't be a single ={==...==}=. =C-c * c= highlights the passage in pieces instead, with the comment after the last:
+
+#+begin_example
+{==two.==}
+
+* {==Heading==}
+
+{==Three==} {++x++}{>>@SLW<<} {==four==}{>>@SLW the note<<}
+#+end_example
+
+The review pane lists it as one comment, deleting it takes every piece's braces with it, and export sends Word one comment over the whole passage. A selection that starts or ends inside other markup is trimmed to the text outside it.
 
 * What comes across, and what doesn't
 
@@ -75,7 +90,7 @@ Kept, though not editable as text:
 
 Not yet:
 
-- *Comments spanning paragraphs.* A comment that covers more than one paragraph comes in pinned to its end.
+- *Comments spanning paragraphs, coming from Word.* These come in pinned to the end of the passage. (Ones you make in Emacs go out to Word over their whole passage; see below.)
 - *Tracked moves.* These come back as a deletion plus an insertion.
 - *Text inside tables* isn't editable.
 - *Unusual emphasis.* If org can't express a paragraph's italics or bold (an italic bracket, say), that paragraph shows them plainly in org and keeps them as they were in Word.

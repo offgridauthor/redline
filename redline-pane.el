@@ -107,7 +107,45 @@ joins that entry's thread, which is how cm-mode attaches authors."
                       :new (plist-get it :new)
                       :comments (and c (list c)))
                 entries))))
-    (nreverse entries)))
+    (redline--join-fragments (nreverse entries))))
+
+(defun redline--gap-p (from to)
+  "Non-nil if only whitespace or heading stars lie between FROM and TO.
+Markup in between is skipped by the caller."
+  (save-excursion
+    (goto-char from)
+    (while (and (< (point) to)
+                (or (> (skip-chars-forward " \t\n" to) 0)
+                    (and (bolp) (looking-at "\\*+[ \t]")
+                         (goto-char (min to (match-end 0)))))))
+    (>= (point) to)))
+
+(defun redline--join-fragments (entries)
+  "Fold runs of uncommented highlights into the commented one after them.
+A comment on a passage that crosses paragraphs or other changes is
+written as several highlights, {==A==} {++x++} {==B==}{>>note<<}, since
+CriticMarkup can't nest; the last one carries the comment and the
+others are listed under :frags as (BEG END BODY)."
+  (let (out held run cursor)
+    (dolist (e entries)
+      (when (and run (not (redline--gap-p cursor (plist-get e :beg))))
+        (setq out (append held out) held nil run nil))
+      (let ((hl (eq (plist-get e :type) 'cm-highlight)))
+        (cond
+         ((and hl (null (plist-get e :comments)))
+          (push e held)
+          (push e run))
+         ((and hl run)
+          (plist-put e :frags (mapcar (lambda (f) (list (plist-get f :beg) (plist-get f :end)
+                                                        (plist-get f :body)))
+                                      (reverse run)))
+          (setq out (append (seq-remove (lambda (x) (memq x run)) held) out)
+                held nil run nil)
+          (push e out))
+         (run (push e held))
+         (t (push e out))))
+      (setq cursor (plist-get e :end)))
+    (nreverse (append held out))))
 
 (defun redline--entry-author (entry)
   "First author tag attached to ENTRY, or nil."
@@ -222,6 +260,8 @@ joins that entry's thread, which is how cm-mode attaches authors."
         ;; Hide braces on the change itself (not on bare comments).
         (unless (eq type 'cm-comment)
           (redline--hide-delims (plist-get e :beg) (plist-get e :item-end))
+          (dolist (f (plist-get e :frags))
+            (redline--hide-delims (car f) (cadr f)))
           (when (eq type 'cm-substitution)
             (save-excursion
               (goto-char (plist-get e :beg))
@@ -320,14 +360,19 @@ joins that entry's thread, which is how cm-mode attaches authors."
                 (propertize "RET jump · g refresh\na accept · r reject\nc resolve · k delete\nA/R accept/reject all\n\n" 'face 'shadow))
         (dolist (e entries)
           (let* ((type (plist-get e :type))
-                 (beg (plist-get e :beg))
+                 (beg (or (car (car (plist-get e :frags))) (plist-get e :beg)))
                  (line (with-current-buffer src (line-number-at-pos beg)))
                  (what (pcase type
                          ('cm-substitution (format "%s → %s"
                                                    (redline--snippet (plist-get e :body) 18)
                                                    (redline--snippet (plist-get e :new) 18)))
                          ('cm-comment nil)
-                         (_ (format "“%s”" (redline--snippet (plist-get e :body) 36)))))
+                         (_ (format "“%s”" (redline--snippet
+                                            (mapconcat #'identity
+                                                       (append (mapcar #'caddr (plist-get e :frags))
+                                                               (list (plist-get e :body)))
+                                                       " … ")
+                                            36)))))
                  (head (format "%-10s L%d" (alist-get type redline--labels) line))
                  (block-start (point)))
             (insert-text-button head
@@ -486,6 +531,99 @@ joins that entry's thread, which is how cm-mode attaches authors."
           (delete-region (nth 2 c) (nth 3 c))))
       (redline--after-change))))
 
+;;;; Commenting
+
+(defun redline--insert-comment ()
+  "Insert an empty comment at point, signed by `cm-author', and step inside."
+  (let ((inhibit-read-only t))
+    (cm-without-following-changes
+      (insert "{>>" (if cm-author (concat "@" cm-author " ") "") "<<}"))
+    (backward-char 3)))
+
+(defun redline--item-around (items pos &optional inclusive)
+  "The item in ITEMS whose braces enclose POS.
+With INCLUSIVE, POS may also sit on either edge."
+  (seq-find (lambda (it) (if inclusive
+                             (<= (plist-get it :beg) pos (plist-get it :end))
+                           (< (plist-get it :beg) pos (plist-get it :end))))
+            items))
+
+(defun redline--comment-at-point (items)
+  "Comment at point, or reply if point is on a comment already.
+ITEMS is the buffer's markup, from `redline--scan'."
+  (let ((it (redline--item-around items (point) t)))
+    (cond
+     ((and it (memq (plist-get it :type) '(cm-comment cm-highlight)))
+      (redline-reply))
+     ((and it (< (plist-get it :beg) (point)))
+      ;; Inside or just after a change: the comment goes on the change.
+      (goto-char (plist-get it :end))
+      (if (looking-at-p "{>>") (redline-reply) (redline--insert-comment)))
+     (t (redline--insert-comment)))))
+
+(defun redline--pieces (beg end items)
+  "Stretches of plain text from BEG to END, as (BEG . END) pairs.
+They stop at ITEMS (other markup) and at paragraph breaks, and leave
+out heading stars and the whitespace at their edges."
+  (let (pieces (pos beg))
+    (dolist (stop (append (seq-filter (lambda (it) (and (>= (plist-get it :beg) beg)
+                                                        (<= (plist-get it :end) end)))
+                                      items)
+                          (list (list :beg end :end end))))
+      (save-excursion
+        (goto-char pos)
+        (let ((limit (plist-get stop :beg)))
+          (while (< (point) limit)
+            (skip-chars-forward " \t\n" limit)
+            (when (and (bolp) (looking-at "\\*+[ \t]+"))
+              (goto-char (min limit (match-end 0))))
+            (let ((pb (point))
+                  (pe (if (re-search-forward "\n[ \t]*\n" limit t) (match-beginning 0) limit)))
+              (save-excursion
+                (goto-char pe)
+                (skip-chars-backward " \t\n" pb)
+                (when (> (point) pb) (push (cons pb (point)) pieces)))
+              (goto-char (max pe (point)))))))
+      (setq pos (plist-get stop :end)))
+    (nreverse pieces)))
+
+(defun redline-comment (&optional beg end)
+  "Comment on the region from BEG to END, or at point.
+Like cm-mode's `cm-comment', with three differences.  On a comment
+already, it adds a reply.  A region that starts or ends inside other
+markup is trimmed to the text outside it.  A region that crosses
+paragraphs or other changes is highlighted in pieces, with the comment
+after the last, since CriticMarkup can't nest; export sends it to Word
+as one comment over the whole passage."
+  (interactive (and (use-region-p) (list (region-beginning) (region-end))))
+  (let ((items (redline--scan)))
+    (when beg
+      (deactivate-mark)
+      (let ((a (redline--item-around items beg))
+            (b (redline--item-around items end)))
+        (when a (setq beg (plist-get a :end)))
+        (when b (setq end (plist-get b :beg)))))
+    (let ((pieces (and beg (< beg end) (redline--pieces beg end items))))
+      (if (null pieces)
+          (progn (when end (goto-char end))
+                 (redline--comment-at-point items))
+        (let ((inhibit-read-only t)
+              (last (car (last pieces)))
+              spot)
+          (cm-without-following-changes
+            (dolist (pc (reverse pieces))
+              (goto-char (cdr pc))
+              (insert "==}")
+              (when (eq pc last)
+                (insert "{>>" (if cm-author (concat "@" cm-author " ") ""))
+                (setq spot (point-marker))
+                (insert "<<}"))
+              (goto-char (car pc))
+              (insert "{==")))
+          (goto-char spot)
+          (set-marker spot nil)))))
+  (redline--after-change))
+
 ;;;; Accept, reject, resolve
 
 (defun redline--said (e)
@@ -528,7 +666,12 @@ that remains, or stay at the spot if no text remains."
         (save-excursion
           (goto-char (plist-get e :beg))
           (delete-region (plist-get e :beg) (plist-get e :end))
-          (insert text))))
+          (insert text)
+          (when (eq action 'delete)
+            (dolist (f (reverse (plist-get e :frags)))
+              (goto-char (car f))
+              (delete-region (car f) (cadr f))
+              (insert (caddr f)))))))
     (font-lock-flush)
     (redline--after-change)))
 
