@@ -79,9 +79,13 @@ Nil means the value of the variable `user-full-name'."
   :type '(choice (const :tag "user-full-name" nil) string))
 
 (defcustom redline-my-other-names nil
-  "Other names you've used in Word, like \"Stephen Webber\".
-Changes and comments under these names come in with your tag, and
-go back out under the name they were made with."
+  "Names Word has recorded for you in earlier rounds, like \"Stephen W\".
+Word labels every change and comment with the name it was made
+under, and that name can drift between computers and versions of
+Word.  Changes and comments under these names come in as yours,
+with your tag, so you can revise, reply to, accept, or reject them
+as your own work.  Each still goes back to Word under the name it
+was made with."
   :type '(repeat string))
 
 (defcustom redline-track-changes-on-open t

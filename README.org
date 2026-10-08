@@ -39,10 +39,12 @@ Until redline is on MELPA, Emacs 30 can install it straight from GitHub:
   :bind ("C-c * o" . redline-import)
   :custom
   (redline-my-name "Your Name")                    ; as Word should show it
-  (redline-my-other-names '("Your N")))            ; other names you've used in Word
+  (redline-my-other-names '("Your N")))            ; older names Word has for you; see below
 #+end_src
 
 With a local clone, use =:load-path "~/path/to/redline"= in place of =:vc=.
+
+Word labels each change with whatever name that copy of Word had for you, so earlier rounds of the same job can carry several versions of your name. List them in =redline-my-other-names= and changes under them come in as yours, with your tag, to revise as your own work. Each still goes back to Word under the name it was made with.
 
 =redline-maybe-enable= turns on =redline-mode= only in org files that came from a .docx or already contain CriticMarkup, so the rest of your org files stay as they are. Your initials come from =cm-author= (set it with =(setq-default cm-author "XYZ")= or =C-c * t=).
 
