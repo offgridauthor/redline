@@ -1,0 +1,4 @@
+*.elc
+/.deps/
+__pycache__/
+test/fixtures/*.org

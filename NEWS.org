@@ -1,0 +1,9 @@
+#+title: redline news
+
+* 0.1.0 (unreleased)
+
+First release.
+
+- Import a .docx as org with CriticMarkup, including comment threads, resolved comments, and inline objects.
+- Export back to a copy of the original as real Word tracked changes, keeping the author's formatting.
+- =redline-mode=: tracking on in files from Word, review pane with accept, reject, resolve, and delete, margin author tags, clean view, replies.
