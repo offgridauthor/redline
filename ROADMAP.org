@@ -52,9 +52,11 @@ A "show invisibles" toggle could give each its own glyph, without changing the f
 - *Query list.* Collect your comments into an org list by chapter, for the cover letter or an author-query sheet. [S]
 - *Canned queries.* Insert stock comments ("AU: OK as edited?", "Please check this fact") from a list you keep. [S]
 - *Comment types.* Query, Edit, Note, so the pane can show only queries. Obsidian's Review Comments plugin does this with a TYPE prefix. [S]
-- *Pane filters.* By author, changes only, open comments only. [S]
+- *Pane filters.* By author, changes only, open comments only. The same filters could apply to =C-c * n= / =p= ("next change by the author", "next open query"). [S]
 - *Word's views.* Simple Markup (deletions hidden), Original, and Final, as display-only toggles beside clean view. [M]
 - *Word count* without markup or deleted text, and *flyspell* that skips markup. [S]
+- *Other Emacs work in this area.* scimax (John Kitchin) has editmarks, its own track-changes markup for org ({>+ +<}, {>- -<}, {>~ ~<}, with an optional @author inside), with next/previous, accept/reject, a typo mark, and LaTeX export, but no Word round trip; its VS Code successor documents the same. Emacs's built-in =highlight-changes-mode= marks what changed since you turned it on, with next/previous, but keeps nothing in the file. obsidian.el edits an Obsidian vault from Emacs (links, tags, capture) and doesn't touch CriticMarkup, so redline-mode in markdown-mode would give Obsidian vault files the same review tools. [notes, no size]
+- *scimax interop.* redline.py could read and write editmarks as a second dialect (=--markup editmarks=), so a scimax user could send a manuscript to Word and back without changing tools, and redline-mode could step through editmarks the same way. The two markups map almost one to one; editmarks' tasks, typos, and colored highlights would come in as comments. Worth offering to John Kitchin before writing it, since scimax may prefer to call redline.py itself. [M]
 - *cm-mode upstream.* Report the RET problem (cm-mode edits the buffer from =before-change-functions=, and =newline='s cleanup then moves point a line back in org). redline works around it with =redline-newline=. [S]
 
 * Markdown

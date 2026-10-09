@@ -282,6 +282,7 @@ others are listed under :frags as (BEG END BODY)."
 (defun redline-toggle-clean-view ()
   "Toggle between raw CriticMarkup and a Word-like clean view."
   (interactive)
+  (redline--ensure)
   (setq redline-clean-view (not redline-clean-view))
   (add-to-invisibility-spec 'redline-markup)
   (redline-refresh-overlays)
@@ -410,6 +411,7 @@ others are listed under :frags as (BEG END BODY)."
 (defun redline-pane ()
   "Show the review pane for the current buffer in a right side window."
   (interactive)
+  (redline--ensure)
   (let* ((src (current-buffer))
          (pane (redline--pane-buffer src)))
     (with-current-buffer pane
@@ -506,6 +508,7 @@ others are listed under :frags as (BEG END BODY)."
 (defun redline-reply ()
   "Add a reply to the comment thread at point, as `cm-author'."
   (interactive)
+  (redline--ensure)
   (let ((e (redline--entry-at (point))))
     (unless (and e (plist-get e :comments))
       (user-error "Point isn't on a comment or a change with comments"))
@@ -521,6 +524,7 @@ others are listed under :frags as (BEG END BODY)."
 (defun redline-delete-comment ()
   "Delete just the one comment at point (not the change it annotates)."
   (interactive)
+  (redline--ensure)
   (let* ((e (redline--entry-at (point)))
          (c (and e (seq-find (lambda (c) (and (<= (nth 2 c) (point)) (<= (point) (nth 3 c))))
                              (plist-get e :comments)))))
@@ -530,6 +534,20 @@ others are listed under :frags as (BEG END BODY)."
         (cm-without-following-changes
           (delete-region (nth 2 c) (nth 3 c))))
       (redline--after-change))))
+
+;;;; Turning redline on from any review key
+
+(defvar redline-mode)
+(declare-function redline-mode "redline" (&optional arg))
+
+(defun redline--ensure ()
+  "Turn on `redline-mode' here if it isn't on yet.
+So a review key works the first time it's pressed, in any org,
+Markdown, or text buffer, without turning the mode on by hand."
+  (unless (bound-and-true-p redline-mode)
+    (unless (derived-mode-p 'text-mode)
+      (user-error "Redline works in org, Markdown, and text buffers"))
+    (redline-mode 1)))
 
 ;;;; Commenting
 
@@ -596,6 +614,7 @@ paragraphs or other changes is highlighted in pieces, with the comment
 after the last, since CriticMarkup can't nest; export sends it to Word
 as one comment over the whole passage."
   (interactive (and (use-region-p) (list (region-beginning) (region-end))))
+  (redline--ensure)
   (let ((items (redline--scan)))
     (when beg
       (deactivate-mark)
@@ -623,6 +642,94 @@ as one comment over the whole passage."
           (goto-char spot)
           (set-marker spot nil)))))
   (redline--after-change))
+
+;;;; Moving between changes, like Word's Next and Previous
+
+(defun redline--entry-start (e)
+  "Where entry E starts, counting the pieces of a passage comment."
+  (or (car (car (plist-get e :frags))) (plist-get e :beg)))
+
+(defun redline--describe (e)
+  "One line about entry E, for the echo area."
+  (let* ((type (plist-get e :type))
+         (who (redline--entry-author e))
+         (said (mapconcat (lambda (c) (format "%s: %s" (or (car c) "?") (nth 1 c)))
+                          (redline--said e) " · ")))
+    (concat (alist-get type redline--labels)
+            (and who (memq type '(cm-addition cm-deletion cm-substitution))
+                 (format " by %s" who))
+            (pcase type
+              ('cm-substitution (format " “%s” → “%s”" (redline--snippet (plist-get e :body) 30)
+                                        (redline--snippet (plist-get e :new) 30)))
+              ('cm-comment nil)
+              (_ (format " “%s”" (redline--snippet (plist-get e :body) 50))))
+            (and (not (string-empty-p said)) (concat "  —  " said)))))
+
+(defconst redline--change-types '(cm-addition cm-deletion cm-substitution)
+  "Entry types that are tracked changes.")
+
+(defun redline--step (n pred noun)
+  "Move N stops through the entries that satisfy PRED.
+Negative N moves back.  NOUN names them in the message when there are
+no more.  Each stop shows the entry in the echo area and the pane."
+  (redline--ensure)
+  (setq n (or n 1))
+  (let ((es (seq-filter pred (redline--entries))) target)
+    (dotimes (_ (abs n))
+      (let ((pt (if target (redline--entry-start target) (point))))
+        (setq target
+              (or (if (> n 0)
+                      (seq-find (lambda (e) (> (redline--entry-start e) pt)) es)
+                    (car (last (seq-filter (lambda (e) (< (redline--entry-start e) pt)) es))))
+                  (user-error "No more %s %s" noun (if (> n 0) "below" "above"))))))
+    (goto-char (redline--entry-start target))
+    (redline--follow-point)
+    (message "%s" (redline--describe target))))
+
+(defun redline-next-change (&optional n)
+  "Move to the next tracked change, like Word's Next under Changes.
+A change and the comments on it are one stop.  With N, move N
+changes; negative N moves back."
+  (interactive "p")
+  (redline--step n (lambda (e) (memq (plist-get e :type) redline--change-types))
+                 "tracked changes"))
+
+(defun redline-previous-change (&optional n)
+  "Move to the previous tracked change; with N, move N back."
+  (interactive "p")
+  (redline-next-change (- (or n 1))))
+
+(defun redline-next-comment (&optional n)
+  "Move to the next comment thread, like Word's Next under Comments.
+Counts comments on a passage, standalone comments, and comments on a
+change; a bare author tag isn't a comment.  With N, move N threads;
+negative N moves back."
+  (interactive "p")
+  (redline--step n #'redline--said "comments"))
+
+(defun redline-previous-comment (&optional n)
+  "Move to the previous comment thread; with N, move N back."
+  (interactive "p")
+  (redline-next-comment (- (or n 1))))
+
+(defun redline--resolve-and-next (action)
+  "Do ACTION (accept or reject) to the change at point, then move on."
+  (let ((e (redline--entry-at (point))))
+    (if (and e (memq (plist-get e :type) redline--change-types))
+        (progn (goto-char (plist-get e :beg))
+               (redline--resolve e action))
+      (message "No change at point to %s" action)))
+  (redline-next-change))
+
+(defun redline-accept-and-next ()
+  "Accept the change at point and move to the next one."
+  (interactive)
+  (redline--resolve-and-next 'accept))
+
+(defun redline-reject-and-next ()
+  "Reject the change at point and move to the next one."
+  (interactive)
+  (redline--resolve-and-next 'reject))
 
 ;;;; Accept, reject, resolve
 

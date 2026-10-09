@@ -102,6 +102,39 @@
     (call-interactively (key-binding (kbd "RET")))
     (should (equal (buffer-string) "Zero here.\n\nOne. {++\n\n++}{>>@SLW<<}Two."))))
 
+(ert-deftest redline-test-next-and-previous ()
+  (redline-test-with "A {++b++}{>>@SLW<<}{--tech--}{>>@SLW<<} too {==x==}{>>@Copyedit q<<}{>>@SLW r<<} end {~~a~>b~~}{>>@D<<} {>>@Dana Note<<}."
+    (cl-flet ((stops (fn) (goto-char (point-min))
+                (let (ps) (condition-case nil (while t (funcall fn) (push (point) ps))
+                            (user-error nil))
+                     (nreverse ps))))
+      ;; Tracked changes: one stop each, author tags and all.
+      (should (= (length (stops #'redline-next-change)) 3))
+      ;; Comments: the thread on x, and Dana's note; bare tags don't count.
+      (should (= (length (stops #'redline-next-comment)) 2)))
+    (goto-char (point-max))
+    (redline-previous-change 2)
+    (should (looking-at-p (regexp-quote "{--tech--}")))
+    (goto-char (point-min))
+    (redline-next-change)
+    (redline-accept-and-next)
+    (should (string-prefix-p "A b{--tech--}" (buffer-string)))
+    (should (looking-at-p (regexp-quote "{--tech--}")))))
+
+(ert-deftest redline-test-keys-work-before-the-mode ()
+  (should (eq (keymap-lookup redline-command-map "c") #'redline-comment))
+  (should (eq (keymap-lookup redline-command-map "a") #'cm-addition)) ; cm-mode's, beneath
+  (with-temp-buffer
+    (org-mode)
+    (insert "Plain org, no markup yet.")
+    (setq-local cm-author "SLW")
+    (should-not (bound-and-true-p redline-mode))
+    (goto-char (point-max))
+    (redline-comment)
+    (insert "first note")
+    (should redline-mode)
+    (should (string-suffix-p "{>>@SLW first note<<}" (buffer-string)))))
+
 (ert-deftest redline-test-reply-adds-to-thread ()
   (redline-test-with "X {==y==}{>>@Dana Should I?<<} z."
     (search-forward "Should")

@@ -203,15 +203,44 @@ start of the paragraph.  With tracking off, this is org's RET."
       (insert "\n")
     (call-interactively (if (derived-mode-p 'org-mode) #'org-return #'newline))))
 
+(defun redline-toggle-tracking ()
+  "Switch change tracking on or off, like Word's Track Changes button.
+Turns on `redline-mode' first if needed, so the red header shows."
+  (interactive)
+  (redline--ensure)
+  (cm-follow-changes-mode (if cm-follow-changes-mode -1 1))
+  (message "Tracking %s" (if cm-follow-changes-mode
+                             (format "on, as %s" (or cm-author "no one; set it with C-c * t"))
+                           "off")))
+
+(defvar-keymap redline-command-map
+  :doc "Redline's review commands, with cm-mode's own beneath them.
+`redline-mode' puts this on C-c *.  To have it in every buffer,
+including org buffers before redline is on (where org's own C-c *
+would turn lines into headings), bind it yourself:
+
+  (keymap-global-set \"C-c *\" redline-command-map)
+  (with-eval-after-load \='org
+    (keymap-set org-mode-map \"C-c *\" redline-command-map))"
+  :parent cm-prefix-map
+  "c" #'redline-comment
+  "n" #'redline-next-change
+  "p" #'redline-previous-change
+  "N" #'redline-next-comment
+  "P" #'redline-previous-comment
+  "RET" #'redline-accept-and-next
+  "DEL" #'redline-reject-and-next
+  "l" #'redline-pane
+  "h" #'redline-toggle-clean-view
+  "r" #'redline-reply
+  "k" #'redline-delete-comment
+  "o" #'redline-import
+  "w" #'redline-export
+  "F" #'redline-toggle-tracking)
+
 (defvar-keymap redline-mode-map
-  :doc "Keys for `redline-mode', beside cm-mode's own under C-c *."
-  "C-c * c" #'redline-comment
-  "C-c * l" #'redline-pane
-  "C-c * h" #'redline-toggle-clean-view
-  "C-c * r" #'redline-reply
-  "C-c * k" #'redline-delete-comment
-  "C-c * o" #'redline-import
-  "C-c * w" #'redline-export
+  :doc "Keys for `redline-mode': its commands and cm-mode's under C-c *."
+  "C-c *" redline-command-map
   "<right-margin> <mouse-1>" #'redline-margin-click
   "<remap> <org-return>" #'redline-newline
   "<remap> <org-return-and-maybe-indent>" #'redline-newline

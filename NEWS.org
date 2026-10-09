@@ -9,6 +9,8 @@ First release.
 - Splitting or joining paragraphs while tracking goes to Word as an inserted or deleted paragraph mark, the way Word records it.  Before, the split went out untracked and could leak markup into the file.
 - RET while tracking in org no longer moves the second newline to the start of the paragraph.
 - Changing a heading's level is a tracked style change.
+- Next and previous tracked change (=C-c * n= / =p=) and comment thread (=N= / =P=), like Word's Review tab, one stop per change and its comments.  =C-c * RET= / =DEL= accept or reject and move on.
+- =redline-command-map= holds the =C-c *= keys, so they can be bound in every buffer; each command turns =redline-mode= on if it's off.  =C-c * F= is now =redline-toggle-tracking=, which does the same and reports who you're tracking as.
 - Exported files have Word's Track Changes switched on (=redline-word-tracking-on=, =--keep-settings=).
 
 - Import a .docx as org with CriticMarkup, including comment threads, resolved comments, and inline objects.

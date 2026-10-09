@@ -46,7 +46,17 @@ Until redline is on MELPA, Emacs 30 can install it straight from GitHub:
 
 With a local clone, use =:load-path "~/path/to/redline"= in place of =:vc=.
 
-Word labels each change with whatever name that copy of Word had for you, so earlier rounds of the same job can carry several versions of your name. List them in =redline-my-other-names= and changes under them come in as yours, with your tag, to revise as your own work. Each still goes back to Word under the name it was made with.
+The keys below live on =C-c *= once =redline-mode= is on. To have them in every buffer, including an org file you haven't started reviewing yet (where org's own =C-c *= turns lines into headings), load redline at startup (=:demand t=) and bind its map yourself:
+
+#+begin_src emacs-lisp
+(keymap-global-set "C-c *" redline-command-map)
+(with-eval-after-load 'org
+  (keymap-set org-mode-map "C-c *" redline-command-map))
+#+end_src
+
+Any redline key then turns =redline-mode= on where it's pressed.
+
+Word labels each change with whatever name that copy of Word had for you, so earlier rounds of the same job can contain several versions of your name. List them in =redline-my-other-names= and changes under them come in as yours, with your tag, to revise as your own work. Each still goes back to Word under the name it was made with.
 
 =redline-maybe-enable= turns on =redline-mode= only in org files that came from a .docx or already contain CriticMarkup, so the rest of your org files stay as they are. Your initials come from =cm-author= (set it with =(setq-default cm-author "XYZ")= or =C-c * t=).
 
@@ -60,9 +70,23 @@ cm-mode's own keys work as usual under =C-c *=: =F= turns tracking on and off, =
 | =C-c * h= | Clean view on or off                                         |
 | =C-c * r= | Reply to the comment thread at point                         |
 | =C-c * c= | Comment on the region, or at point (on a comment: reply)     |
+| =C-c * n= | Next tracked change (=p= previous)                           |
+| =C-c * N= | Next comment thread (=P= previous)                           |
+| =C-c * RET= | Accept the change at point and go to the next             |
+| =C-c * DEL= | Reject the change at point and go to the next             |
 | =C-c * k= | Delete just the one comment at point                         |
 | =C-c * o= | Open a .docx                                                 |
 | =C-c * w= | Export to .docx                                              |
+
+Changes and comments each have their own next and previous, as in Word's Review tab. A change and its comments are one stop, and the echo area says who made it and what the comments say. (cm-mode's own =C-c * f= and =b= stop at every brace.) These are easy to put on keys of your own in =redline-mode-map=, like arrows:
+
+#+begin_src emacs-lisp
+(with-eval-after-load 'redline
+  (keymap-set redline-mode-map "C-H-<right>" #'redline-next-change)
+  (keymap-set redline-mode-map "C-H-<left>"  #'redline-previous-change)
+  (keymap-set redline-mode-map "C-H-<down>"  #'redline-next-comment)
+  (keymap-set redline-mode-map "C-H-<up>"    #'redline-previous-comment))
+#+end_src
 
 In the review pane: =RET= jumps to the text, =a= / =r= accept or reject, =c= marks a thread resolved, =k= deletes a thread, =A= / =R= accept or reject everything, =g= refreshes.
 
@@ -99,7 +123,7 @@ Not yet:
 
 * How it's been tested
 
-- *Word files from the wild:* the bridge has been run over about 190 real .docx files. That's 88 from pandoc's test suite, plus about a hundred working manuscripts, edits, and style sheets saved by Word 2007 through Microsoft 365 (Windows and Mac), LibreOffice, and other tools, with over 30,000 tracked changes and 3,000 comments between them.
+- *Word files from the wild:* the bridge has been tested on about 190 real .docx files. That's 88 from pandoc's test suite, plus about a hundred working manuscripts, edits, and style sheets saved by Word 2007 through Microsoft 365 (Windows and Mac), LibreOffice, and other tools, with over 30,000 tracked changes and 3,000 comments between them.
 - *What each file went through:* importing and exporting with no edits gives every body element back unchanged. Edits of every kind read back the same. Every export opens in LibreOffice and passes an OOXML schema check, and rejecting all of the editor's changes gives back the original text.
 - *The test suite:* =make check= byte-compiles, lints, and runs the Emacs and Python tests. =python3 test/corpus.py redline.py FOLDER= puts any folder of .docx files through the same paces.
 
