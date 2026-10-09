@@ -76,6 +76,7 @@ OBJ = "\ufffc"             # stands for one inline object in a paragraph
 SEP = "\ue020"             # breaks a comment chain; adds no text
 OPEN = "\ue021"            # {>>OPEN key<<}: where a spanning comment starts
 SPAN = "\ue022"            # {>>@A SPAN key SPAN text<<}: the comment it belongs to
+PMARK = "\ue023"           # PMARK +|- tag PMARK: this paragraph's mark was inserted or deleted
 LINK_ANY = re.compile(r"\[\[docx:([0-9]+\.[0-9]+)\](?:\[(.*?)\])?\]", re.S)
 LINK = re.compile(r"\[\[docx:([0-9]+\.[0-9]+)\](?:\[(.*?)\])?\]", re.S)
 
@@ -123,6 +124,7 @@ class Para:
     level: int = 0                 # heading level, 0 for body text
     opaque: Optional[int] = None   # body index of an element kept verbatim
     preview: str = ""
+    mark: Optional[tuple] = None   # export side: (ins|del, tag) for a tracked paragraph mark
     anchors: list = field(default_factory=list)  # base side: (pos, bookmark element)
 
 
@@ -692,7 +694,11 @@ def flat(text: str) -> str:
 
 
 def parse_para(text: str, me: Optional[str]) -> Para:
-    level = 0
+    level, mark = 0, None
+    pm = re.search(PMARK + r"([+-])([^" + PMARK + r"]*)" + PMARK + r"\s*\Z", text)
+    if pm:
+        mark = ("ins" if pm.group(1) == "+" else "del", pm.group(2) or me)
+        text = text[:pm.start()]
     if text.endswith("\\\\"):
         text += "\n"                              # a line break that ends the paragraph
     m = re.match(r"(\*+) ", text)
@@ -808,7 +814,7 @@ def parse_para(text: str, me: Optional[str]) -> Para:
         return remap.get(p, len(keep))
     for c in comments:
         c.start, c.end = fix(c.start), fix(c.end)
-    return Para(flags, comments, level=level)
+    return Para(flags, comments, level=level, mark=mark)
 
 
 def has_closer(chars, idx) -> bool:
@@ -926,9 +932,43 @@ def join_highlights(body: str) -> str:
     return body
 
 
+def absorb_breaks(body: str) -> str:
+    """A backspace that joins paragraphs deletes one of two newlines.
+
+    One.\\n{--\\n--}Two. reads as one paragraph in org, though the original
+    had two.  Fold the newline left outside into the deletion, so the
+    join is tracked: One.{--\\n\\n--}Two.
+    """
+    out, last = [], 0
+    for m in TOKEN.finditer(body):
+        d = m.group("del")
+        if d is None or "\n" not in d or d.strip():
+            continue
+        end = chain_after(body, m.end())
+        before = re.search(r"[ \t]*\n?[ \t]*\Z", body[last:m.start()])
+        after = re.match(r"[ \t]*\n?[ \t]*", body[end:])
+        outside = before.group(0) + after.group(0)
+        if (d + outside).count("\n") < 2 or outside.count("\n") >= 2:
+            continue
+        out.append(body[last:m.start() - len(before.group(0))])
+        out.append("{--" + before.group(0) + d + after.group(0) + "--}" + body[m.end():end])
+        last = end + after.end()
+    out.append(body[last:])
+    return "".join(out)
+
+
 def org_blocks(body: str):
     """Split org body into paragraph strings on blank lines outside markup."""
     body = join_highlights(body)
+
+    def split_sub(m):
+        if m.group("old") is None or not re.search(r"\n[ \t]*\n", m.group(0)):
+            return m.group(0)
+        tag = re.match(r"\{>>@([^\s<]+)<<\}", body[m.end():m.end() + 80])
+        glue = "{>>@" + tag.group(1) + "<<}" if tag else ""
+        return "{--" + m.group("old") + "--}" + glue + "{++" + m.group("new") + "++}"
+    body = TOKEN.sub(split_sub, body)
+    body = absorb_breaks(body)
     spans = [(m.start(), m.end(), m) for m in TOKEN.finditer(body)]
     # Comments containing blank lines keep their paragraphs as ¶.
     out, last = [], 0
@@ -938,13 +978,20 @@ def org_blocks(body: str):
             if m.group("cm") is not None:
                 seg = re.sub(r"\s*\n[ \t]*\n\s*", PARA_SEP, seg)
             elif m.group("add") is not None or m.group("del") is not None:
+                # A tracked paragraph split or join: each paragraph but
+                # the last ends with its own paragraph mark inserted or
+                # deleted, the way Word records it.
                 op = "{++" if m.group("add") is not None else "{--"
                 cl = "++}" if op == "{++" else "--}"
                 parts = re.split(r"\n[ \t]*\n+", seg[3:-3])
-                tag = re.match(r"\{>>(@\S+)", body[e:e + 80])
-                glue = ("{>>" + tag.group(1) + "<<}") if tag else ""
-                seg = ("\n\n").join(op + p + cl + (glue if i < len(parts) - 1 else "")
-                                    for i, p in enumerate(parts))
+                tag = re.match(r"\{>>@([^\s<]+)", body[e:e + 80])
+                glue = ("{>>@" + tag.group(1) + "<<}") if tag else ""
+                pmark = PMARK + op[1] + (tag.group(1) if tag else "") + PMARK
+                last_i = len(parts) - 1
+                seg = ("\n\n").join(
+                    (op + p + cl if p or i == last_i else "") +
+                    (glue + pmark if i < last_i and p else pmark if i < last_i else "")
+                    for i, p in enumerate(parts))
         out.append(body[last:s])
         out.append(seg)
         last = e
@@ -1128,6 +1175,18 @@ class Exporter:
                 ppr = etree.SubElement(p, w("pPr"))
                 p.insert(0, ppr)
             ps = ppr.find(w("pStyle"))
+            if src_p is not None and not ppr.findall(w("pPrChange")):
+                # A heading level changed in org: a tracked style change,
+                # so the author sees "Formatted: Heading 2" and can reject it.
+                old = etree.Element(w("pPr"))
+                for x in ppr:
+                    if isinstance(x.tag, str) and etree.QName(x).localname not in ("rPr", "sectPr", "pPrChange"):
+                        old.append(copy.deepcopy(x))
+                chg = etree.SubElement(ppr, w("pPrChange"))
+                chg.set(w("id"), self.change_id())
+                chg.set(w("author"), self.name(self.me))
+                chg.set(w("date"), self.stamp)
+                chg.append(old)
             if para.level:
                 if ps is None:
                     ps = etree.Element(w("pStyle"))
@@ -1254,7 +1313,11 @@ class Exporter:
 
         # A paragraph that is all deletion (or all insertion) takes its
         # paragraph mark along, so accepting the change joins paragraphs.
-        if n and len({c.chg for c in para.chars}) == 1 and para.chars[0].chg:
+        # So does one split or joined while tracking (para.mark).
+        pm = para.mark
+        if not pm and n and len({c.chg for c in para.chars}) == 1 and para.chars[0].chg:
+            pm = (para.chars[0].chg, para.chars[0].author)
+        if pm:
             ppr = p.find(w("pPr"))
             if ppr is None:
                 ppr = etree.Element(w("pPr"))
@@ -1268,10 +1331,10 @@ class Exporter:
                     later[0].addprevious(prpr)
                 else:
                     ppr.append(prpr)
-            mark = etree.Element(w(para.chars[0].chg))
+            mark = etree.Element(w(pm[0]))
             prpr.insert(0, mark)                   # ins/del come first in a mark's rPr
             mark.set(w("id"), self.change_id())
-            mark.set(w("author"), self.name(para.chars[0].author))
+            mark.set(w("author"), self.name(pm[1]))
             mark.set(w("date"), self.stamp)
         return p
 
@@ -1494,6 +1557,33 @@ def ensure_part(rels, types, target, rel_type, part, ctype):
         el.set("ContentType", ctype)
 
 
+# Settings that come before w:trackRevisions in the schema's order.
+SETTINGS_BEFORE = set("""writeProtection view zoom removePersonalInformation removeDateAndTime
+    doNotDisplayPageBoundaries displayBackgroundShape printPostScriptOverText
+    printFractionalCharacterWidth printFormsData embedTrueTypeFonts embedSystemFonts
+    saveSubsetFonts saveFormsData mirrorMargins alignBordersAndEdges bordersDoNotSurroundHeader
+    bordersDoNotSurroundFooter gutterAtTop hideSpellingErrors hideGrammaticalErrors
+    activeWritingStyle proofState formsDesign attachedTemplate linkStyles stylePaneFormatFilter
+    stylePaneSortMethod documentType mailMerge revisionView""".split())
+
+
+def track_revisions_on(data: bytes):
+    """Settings XML with Word's Track Changes switched on, or None if it already is.
+
+    The author's answers to the edit then show as tracked changes too.
+    """
+    root = etree.fromstring(data)
+    if root.find(w("trackRevisions")) is not None:
+        return None
+    at = 0
+    for i, el in enumerate(root):
+        if isinstance(el.tag, str) and etree.QName(el).namespace == W_NS \
+                and etree.QName(el).localname in SETTINGS_BEFORE:
+            at = i + 1
+    root.insert(at, etree.Element(w("trackRevisions")))
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+
+
 def cmd_export(args):
     meta, blocks = read_org(args.org)
     src_rel = meta.get("review_source")
@@ -1633,6 +1723,14 @@ def cmd_export(args):
                     "/" + base.comments_ex_part, CT_COMMENTS_EX)
         parts[base.main_rels] = xml(rels)
     parts["[Content_Types].xml"] = xml(types)
+    if not args.keep_settings:
+        for r in rels:
+            if (r.get("Type") or "").endswith("/settings"):
+                name = posixpath.normpath(posixpath.join(posixpath.dirname(base.main), r.get("Target")))
+                if name in base.names:
+                    changed = track_revisions_on(base.zf.read(name))
+                    if changed is not None:
+                        parts[name] = changed
 
     tmp = out + ".part"
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
@@ -1661,6 +1759,8 @@ def main(argv=None):
     b.add_argument("org")
     b.add_argument("-o", "--output")
     b.add_argument("--me", help="your tag and name, for changes with no author")
+    b.add_argument("--keep-settings", action="store_true",
+                   help="leave Word's Track Changes switch as the original had it")
     args = ap.parse_args(argv)
     (cmd_import if args.cmd == "import" else cmd_export)(args)
 

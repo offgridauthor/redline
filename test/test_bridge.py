@@ -179,6 +179,30 @@ def test_comment_spans(tmp):
     assert xml.count("<w:commentRangeStart ") == 2
 
 
+def test_paragraph_split_and_join(tmp):
+    """Splitting or joining paragraphs while tracking records the paragraph mark."""
+    src = os.path.join(tmp, "pm.docx")
+    doc = Document()
+    for t in ("One. Two.", "Three.", "Four.", "Five.", "Six."):
+        doc.add_paragraph(t)
+    doc.save(src)
+    run("import", src, "--me", ME)
+    org = src[:-5] + ".org"
+    text = open(org, encoding="utf-8").read()
+    text = text.replace("One. Two.", "One. {++\n\n++}{>>@SLW<<}Two.")
+    text = text.replace("Five.\n\nSix.", "Five.\n{--\n--}{>>@SLW<<}Six.")       # one backspace
+    text = text.replace("Three.\n\nFour.", "Three.{--\n\n--}{>>@SLW<<}Four.")
+    open(org, "w", encoding="utf-8").write(text)
+    out = os.path.join(tmp, "pm-out.docx")
+    run("export", org, "-o", out, "--me", ME)
+    xml = zipfile.ZipFile(out).read("word/document.xml").decode()
+    assert "{" not in re.sub(r"<[^>]+>", "", xml) and not re.search("[\ue000-\ue0ff]", xml)
+    settings = zipfile.ZipFile(out).read("word/settings.xml").decode()
+    assert "<w:trackRevisions/>" in settings
+    marks = re.findall(r"<w:pPr>.*?<w:rPr><w:(ins|del) [^>]*w:author=\"Stephen Lloyd Webber\"", xml)
+    assert marks == ["ins", "del", "del"], marks
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):
