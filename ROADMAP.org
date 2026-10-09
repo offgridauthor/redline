@@ -1,0 +1,86 @@
+#+title: redline roadmap
+
+Two parts: what a Word ⇄ plain-text round trip has to get right (and where redline stands on each), then features worth adding, Markdown among them. Items stand on their own; none waits on another unless it says so. Sizes are rough: S is an afternoon, M a few days, L a week or more.
+
+* What a round trip has to get right
+
+Status: *done*, *partial*, or *not yet*.
+
+** Changes
+
+- *Insertions, deletions, replacements* — done.
+- *Several authors, changes with no author, your other names* — done.
+- *Paragraph splits and joins* — done for yours (an inserted or deleted paragraph mark, as Word records it). A client's own splits and joins come in as plain paragraph breaks and go back out untouched, but can't be accepted or rejected from Emacs. Not yet: import them as ={++¶++}= style markup. [M]
+- *Heading level changes* — done: a tracked style change ("Formatted: Heading 2").
+- *Moves* — partial. Word's moves (green double underline) come in as a deletion plus an insertion, so the "moved" pairing is lost. [M]
+- *Formatting changes* — partial. Italics and bold are editable and tracked. Underline, small caps, superscript, font, size, and highlight color are kept but not editable. Org has =_underline_= and =^{super}=, so those two are within reach; small caps has no org markup. [M]
+- *Other paragraph formatting* (a style switched to Block Text, indents, centering) — kept, not editable, not visible. [S to show the style name in the margin]
+- *Inside tables, footnotes, endnotes, headers, text boxes* — kept, not editable. Footnote text matters most for editing books. [L]
+
+** Comments
+
+- *Threads, replies, resolved* — done.
+- *Ranges in one paragraph, and points* — done.
+- *Ranges across paragraphs or over other changes* — done for yours (=C-c * c=). A client's comment like that comes in pinned to the end of its passage. Not yet: import it as pieces, the same form =C-c * c= makes. [M]
+- *Formatting inside comments* (italics, links) — lost; paragraphs inside a comment survive as ¶. [S–M]
+- *Word 365's newer comment parts* (=commentsIds=, =commentsExtensible=, @mentions) — partial. Threads and resolved state come through =commentsExtended=, which 365 reads. Mentions come in as plain text. Worth one test with a real 365 file. [S]
+
+** Characters an editor has to see
+
+These come through intact, but some look alike in Emacs:
+
+- nonbreaking space and thin space versus a plain space;
+- en dash, em dash, minus, and hyphen in some fonts;
+- straight versus curly quotes and apostrophes;
+- the ellipsis character versus three periods;
+- soft hyphens and zero-width spaces (kept, invisible).
+
+A "show invisibles" toggle could give each its own glyph, without changing the file. [S]
+
+** Things that live outside the text
+
+- *Automatic list numbers* — Word keeps the "1." in a numbering definition, so org shows the items without numbers. [M to show them as display only]
+- *Fields* (table of contents, cross-references, Zotero or EndNote citations) and *images* — kept as =[[docx:…]]= links.
+- *Page and section breaks, fonts, spacing, page setup, styles* — kept from the original.
+- *Track Changes switch* — done: on in the returned file, so the author's answers are tracked.
+- *Strikethrough as formatting* (authors who strike text to mean "cut this") — kept as formatting, so it looks like ordinary text in org. Worth showing differently from a tracked deletion. [S]
+
+* Features from editing practice
+
+- *Next round.* The author sends the file back with your changes accepted or rejected and theirs added. Import already refuses to overwrite your org; it could instead write =NAME-r2.org= and summarize: how many of your changes were accepted, rejected, or still open, and what's new from the author. [M]
+- *Compare.* The author edited without Track Changes. Compare the two .docx files and produce tracked changes, like Word's Compare, by reusing the alignment the exporter already has. [M–L]
+- *Query list.* Collect your comments into an org list by chapter, for the cover letter or an author-query sheet. [S]
+- *Canned queries.* Insert stock comments ("AU: OK as edited?", "Please check this fact") from a list you keep. [S]
+- *Comment types.* Query, Edit, Note, so the pane can show only queries. Obsidian's Review Comments plugin does this with a TYPE prefix. [S]
+- *Pane filters.* By author, changes only, open comments only. [S]
+- *Word's views.* Simple Markup (deletions hidden), Original, and Final, as display-only toggles beside clean view. [M]
+- *Word count* without markup or deleted text, and *flyspell* that skips markup. [S]
+- *cm-mode upstream.* Report the RET problem (cm-mode edits the buffer from =before-change-functions=, and =newline='s cleanup then moves point a line back in org). redline works around it with =redline-newline=. [S]
+
+* Markdown
+
+** What already exists
+
+- *CriticMarkup* is the nearest thing to a standard for changes and comments inside Markdown. It began with MultiMarkdown and the Marked previewer; nvUltra and MultiMarkdown Composer support it too.
+- *Obsidian* has three active plugins, each storing authors and dates its own way, and none exporting to .docx:
+  - Commentator (Fevol): suggestion mode and threads; updated August 2026.
+  - Track Changes (philphilphil): a side panel to accept, reject, or reply; marks can include =author="…" date="…"=.
+  - Review Comments (Shota Shirai): ={>>id|author|date|TYPE: text<<}=, with replies sharing the id.
+- *pandoc* reads tracked changes and comments from .docx into its own span syntax, =[text]{.insertion author="…" date="…"}= and =[note]{.comment-start …}= … =[]{.comment-end …}=, and writes them back. But it makes a new document from a template, so the author's fonts and styles don't return; tried on the test fixture, the changes and comments survived and the formatting didn't. The span syntax is also hard to edit by hand.
+- *Emacs.* cm-mode already works in markdown-mode. tchanges.el (James Thomas) exchanges tracked changes with Word users from Emacs.
+- *The gap* is the one redline fills for org: patching the author's own .docx from plain text, so only your changes are new.
+
+** Plan
+
+- *redline.py writes and reads Markdown* (=--format md=, or chosen by the file name): headings with =#=, =*italic*= and =**bold**=, kept objects as =[text](docx:12.0)=, kept blocks as =<!-- docx_block: 3 -->=, and the header as YAML front matter (=review_source=, =review_authors=). The CriticMarkup inside is the same. [M]
+- *redline-mode in markdown-mode.* The pane, margin tags, clean view, and comment command don't depend on org. The org-only parts (heading stars, =docx:= links, the target fix, RET) need Markdown versions. [S–M]
+- *For people who don't use Emacs.* The Markdown file opens in Obsidian (with one of the plugins above), VS Code, or any editor, and =redline.py export= sends it back as .docx. That makes redline.py worth publishing on PyPI as a command-line tool (=pipx install redline-docx=), separately from the Emacs package. [S, after the Markdown format]
+- *Other tools' author syntax.* Read Track Changes' =author="…"= and Review Comments' =id|author|date= forms, so edits made in Obsidian come back under the right names. Keep writing redline's own ={>>@TAG …<<}=. [M]
+- *pandoc's spans as input.* A file someone made with =pandoc --track-changes=all= could then go back by patching the original instead of regenerating it. [S–M]
+
+** Sources
+
+- [[https://markedapp.com/help/CriticMarkup.html][Marked: CriticMarkup]] and [[https://nvultra.com/help/preferences-criticmarkup][nvUltra: CriticMarkup]]
+- [[https://github.com/Fevol/obsidian-criticmarkup][Commentator (Fevol)]], [[https://www.obsidianstats.com/plugins/track-changes][Track Changes]], [[https://community.obsidian.md/plugins/review-comments][Review Comments]]
+- [[https://hackage.haskell.org/package/pandoc-3.8/src/test/command/2994.md][pandoc test for comments from .docx]]
+- [[https://codeberg.org/quotuva/tchanges][tchanges.el]]

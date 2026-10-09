@@ -18,7 +18,9 @@ The same edits, opened in LibreOffice:
 - *Sends it back as Word.* =M-x redline-export= writes =NAME-TAG-DATE.docx= beside the org file:
   - paragraphs you didn't touch are copied from the original byte for byte;
   - a paragraph you edited takes its formatting from the original character by character, so fonts, sizes, and paragraph styles come back as they were;
-  - switching italics or bold becomes a tracked formatting change the author can reject.
+  - switching italics or bold becomes a tracked formatting change the author can reject, and so does changing a heading's level;
+  - splitting or joining paragraphs while tracking is recorded the way Word records it, so rejecting everything gives back the original paragraphs;
+  - Track Changes is switched on in the file, so the author's answers are tracked too (=redline-word-tracking-on=).
 
   The original .docx is only ever read, and no file is written over.
 
@@ -80,7 +82,7 @@ The review pane lists it as one comment, deleting it takes every piece's braces 
 
 * What comes across, and what doesn't
 
-Kept and editable: text, tracked insertions and deletions (including ones from several authors), comments and reply threads, resolved comments, italics, bold, line breaks, headings, and changes saved with no author name.
+Kept and editable: text, tracked insertions and deletions (including ones from several authors), paragraph splits and joins, comments and reply threads, resolved comments, italics, bold, line breaks, headings, and changes saved with no author name.
 
 Kept, though not editable as text:
 

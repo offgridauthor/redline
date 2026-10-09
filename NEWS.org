@@ -4,8 +4,12 @@
 
 First release.
 
-- =C-c * c= comments on a region that crosses paragraphs or other changes, as a run of highlights that exports as one Word comment over the whole passage.  On a comment, it adds a reply instead of refusing.
+- =C-c * c= comments on a region that crosses paragraphs or other changes, as a series of highlights that exports as one Word comment over the whole passage.  On a comment, it adds a reply instead of refusing.
 - Comments in the same paragraph no longer show as an org-modern target (grey box and ↪).
+- Splitting or joining paragraphs while tracking goes to Word as an inserted or deleted paragraph mark, the way Word records it.  Before, the split went out untracked and could leak markup into the file.
+- RET while tracking in org no longer moves the second newline to the start of the paragraph.
+- Changing a heading's level is a tracked style change.
+- Exported files have Word's Track Changes switched on (=redline-word-tracking-on=, =--keep-settings=).
 
 - Import a .docx as org with CriticMarkup, including comment threads, resolved comments, and inline objects.
 - Export back to a copy of the original as real Word tracked changes, keeping the author's formatting.
