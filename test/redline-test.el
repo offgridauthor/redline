@@ -157,6 +157,42 @@
       (redline-ask-on-docx-mode -1)
       (delete-directory dir t))))
 
+(ert-deftest redline-test-kept-pieces-are-whole ()
+  (redline-test-with "See [[docx:3.0][page break]] here.\n\n#+docx_block: 7 tbl\n\nAfter.\n"
+    (font-lock-ensure)
+    ;; Typing inside a kept piece is refused.
+    (search-forward "page b")
+    (should-error (insert "x") :type 'text-read-only)
+    (should-error (progn (goto-char (point-min)) (search-forward "docx_bl") (insert "x"))
+                  :type 'text-read-only)
+    ;; Typing just after one is fine.
+    (goto-char (point-min)) (search-forward "break]]")
+    (insert "!") (delete-char -1)
+    ;; Backspace over it takes the whole link, tracked.
+    (cm-follow-changes-mode 1)
+    (call-interactively (key-binding (kbd "DEL")))
+    (should (string-match-p (regexp-quote "See {--[[docx:3.0][page break]]--}{>>@SLW<<} here.")
+                            (buffer-string)))
+    ;; Killing part of the block line kills all of it, tracked.
+    (goto-char (point-min)) (search-forward "#+docx")
+    (kill-region (point) (+ (point) 4))
+    (should (string-match-p (regexp-quote "{--#+docx_block: 7 tbl--}{>>@SLW<<}") (buffer-string)))
+    ;; Yanking it elsewhere is a tracked insertion, the other half of a move.
+    (goto-char (point-max))
+    (insert "\n") (yank)
+    (should (string-match-p (regexp-quote "{++\n#+docx_block: 7 tbl++}") (buffer-string)))))
+
+(ert-deftest redline-test-tracking-at-end-of-file ()
+  (redline-test-with "Last line.\n"
+    (cm-follow-changes-mode 1)
+    (goto-char (point-max))
+    (insert "More.")
+    (should (string-suffix-p "{++More.++}{>>@SLW<<}" (buffer-string)))
+    ;; Tracking is still on afterward.
+    (goto-char (point-min)) (search-forward "Last ")
+    (insert "good ")
+    (should (string-match-p (regexp-quote "Last {++good ++}") (buffer-string)))))
+
 (ert-deftest redline-test-reply-adds-to-thread ()
   (redline-test-with "X {==y==}{>>@Dana Should I?<<} z."
     (search-forward "Should")

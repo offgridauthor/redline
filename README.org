@@ -112,8 +112,8 @@ Kept and editable: text, tracked insertions and deletions (including ones from s
 
 Kept, though not editable as text:
 
-- *Links, citations, footnote and endnote marks, images, and other fields.* Each shows inside its paragraph as a link like =[[docx:12.0][see the report]]=. You can move it or delete it (tracked), and the paragraph around it stays editable.
-- *Tables, and fields that stretch across paragraphs.* These come in as a =#+docx_block:= line and go back out unchanged.
+- *Links, citations, footnote and endnote marks, images, and other fields.* Each shows inside its paragraph as a link like =[[docx:12.0][see the report]]=, and acts as one piece: its text is read-only, a backspace or a kill that touches it takes all of it, and yanking it elsewhere moves it. Both halves are tracked when tracking is on. The paragraph around it stays editable.
+- *Tables, and fields that stretch across paragraphs.* These come in as a =#+docx_block:= line, one piece in the same way: delete the line to delete the table, or kill it and yank it elsewhere to move it. Tracked, Word shows the table's rows as deleted, or inserted where it went.
 - *Everything else:* bookmarks, the author's own tracked formatting changes, empty paragraphs, headers, footers, footnote text, page setup, and styles.
 
 Not yet:

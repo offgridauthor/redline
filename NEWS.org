@@ -11,6 +11,8 @@ First release.
 - Changing a heading's level is a tracked style change.
 - Next and previous tracked change (=C-c * n= / =p=) and comment thread (=N= / =P=), like Word's Review tab, one stop per change and its comments.  =C-c * RET= / =DEL= accept or reject and move on.
 - =redline-command-map= holds the =C-c *= keys, so they can be bound in every buffer; each command turns =redline-mode= on if it's off.  =C-c * F= is now =redline-toggle-tracking=, which does the same and reports who you're tracking as.
+- Kept objects (links, footnote marks, page breaks) and kept blocks (tables) act as one piece: read-only text, deleted or moved whole, tracked.  Export marks a deleted or moved table's rows and text as a tracked deletion or insertion; before, a tracked block deletion sent its =#+docx_block= line to Word as text.
+- Typing at the very end of a file while tracking no longer trips cm-mode, which had silently switched tracking off for the rest of the session.
 - =redline-ask-on-docx-mode=: opening a .docx asks whether to review it in redline.
 - Exported files have Word's Track Changes switched on (=redline-word-tracking-on=, =--keep-settings=).
 

@@ -957,9 +957,29 @@ def absorb_breaks(body: str) -> str:
     return "".join(out)
 
 
+# A kept block's line, maybe wrapped in tracked deletion or insertion:
+#   #+docx_block: 39 tbl   or   {--#+docx_block: 39 tbl--}{>>@SLW<<}
+BLOCK_LINE = re.compile(
+    r"(?:\{(?P<op>--|\+\+))?\s*#\+docx_block:\s*(?P<idx>\d+)[^{}\n]*?\s*"
+    r"(?:(?:--|\+\+)\})?(?:\{>>@(?P<who>[^\s<]+)<<\})?\s*\Z")
+
+
+def isolate_blocks(body: str) -> str:
+    """Give every kept block's line a paragraph of its own.
+
+    Yanking a table's line back in while tracking can leave it touching a
+    paragraph, or with the newline it was yanked after inside the markup:
+    After.{++\\n#+docx_block: 7 tbl++}.  Either way it's the table, not text.
+    """
+    body = re.sub(r"\{(\+\+|--)\s*(#\+docx_block:[^{}\n]*?)\s*(?:\+\+|--)\}(\{>>@[^\s<]+<<\})?",
+                  lambda m: "\n\n{" + m.group(1) + m.group(2) + m.group(1) + "}" + (m.group(3) or "") + "\n\n",
+                  body)
+    return re.sub(r"(?m)^(#\+docx_block:[^\n]*)$", r"\n\1\n", body)
+
+
 def org_blocks(body: str):
     """Split org body into paragraph strings on blank lines outside markup."""
-    body = join_highlights(body)
+    body = isolate_blocks(join_highlights(body))
 
     def split_sub(m):
         if m.group("old") is None or not re.search(r"\n[ \t]*\n", m.group(0)):
@@ -1121,6 +1141,64 @@ class Exporter:
         initials = "".join(x[0] for x in full.split()).upper() or None
         self.out_comments.append((cid, full, initials, self.stamp, text, parent_id, None, done))
         return cid
+
+    def track_block(self, el, chg: str, author):
+        """Mark a whole kept block (a table, say) as inserted or deleted.
+
+        Every run gets wrapped in the change, every paragraph mark and
+        table row carries it, and deleted text becomes w:delText, which
+        is how Word records deleting or inserting a table under Track
+        Changes.  Runs already inside a change of the same kind keep it.
+        """
+        def mark():
+            m = etree.Element(w(chg))
+            m.set(w("id"), self.change_id())
+            m.set(w("author"), self.name(author))
+            m.set(w("date"), self.stamp)
+            return m
+        for r in list(el.iter(w("r"))):
+            around = {etree.QName(a).localname for a in r.iterancestors()}
+            if chg in around or around & {"moveFrom", "moveTo"}:
+                continue
+            if chg == "del":
+                for t in r.iter(w("t")):
+                    t.tag = w("delText")
+                for t in r.iter(w("instrText")):
+                    t.tag = w("delInstrText")
+            wrap = mark()
+            r.addprevious(wrap)
+            wrap.append(r)
+        for p in el.iter(w("p")):
+            ppr = p.find(w("pPr"))
+            if ppr is None:
+                ppr = etree.Element(w("pPr"))
+                p.insert(0, ppr)
+            prpr = ppr.find(w("rPr"))
+            if prpr is None:
+                prpr = etree.Element(w("rPr"))
+                later = [x for x in ppr if isinstance(x.tag, str) and
+                         etree.QName(x).localname in ("sectPr", "pPrChange")]
+                if later:
+                    later[0].addprevious(prpr)
+                else:
+                    ppr.append(prpr)
+            if prpr.find(w("ins")) is None and prpr.find(w("del")) is None:
+                prpr.insert(0, mark())
+        for tr in el.iter(w("tr")):
+            trpr = tr.find(w("trPr"))
+            if trpr is None:
+                trpr = etree.Element(w("trPr"))
+                ex_ = tr.find(w("tblPrEx"))
+                if ex_ is not None:
+                    ex_.addnext(trpr)
+                else:
+                    tr.insert(0, trpr)
+            if trpr.find(w("ins")) is None and trpr.find(w("del")) is None:
+                chg_el = trpr.find(w("trPrChange"))
+                if chg_el is not None:
+                    chg_el.addprevious(mark())
+                else:
+                    trpr.append(mark())
 
     def stretch_spans(self):
         """Point each opener at its comment, so the range starts there.
@@ -1638,13 +1716,32 @@ def cmd_export(args):
                 ex.keep_base(Comment(None, "", base_id=ref.get(w("id"))))
         kept += 1
 
+    # Copies for blocks inserted elsewhere (a moved table) come from the
+    # original as it was, before its own deletion is marked.
+    pristine = {}
+    for t in org_strs:
+        bm = BLOCK_LINE.match(t)
+        if bm and bm.group("op") == "++" and int(bm.group("idx")) < len(base.body):
+            pristine[int(bm.group("idx"))] = copy.deepcopy(base.body[int(bm.group("idx"))])
+
     def emit_rebuilt(text, bi):
         nonlocal last_p, rebuilt
-        m = re.match(r"#\+docx_block:\s*(\d+)", text)
+        m = BLOCK_LINE.match(text)
         if m:
-            idx = int(m.group(1))
+            idx = int(m.group("idx"))
             if idx < len(base.body):
-                new_body.append(base.body[idx])
+                el = base.body[idx]
+                if m.group("op"):
+                    # Deleted or inserted whole, as a tracked change.  An
+                    # insertion is a copy, so a moved table can also be
+                    # deleted where it was.
+                    chg = "del" if m.group("op") == "--" else "ins"
+                    if chg == "ins":
+                        el = copy.deepcopy(pristine.get(idx, el))
+                    ex.track_block(el, chg, m.group("who") or me)
+                new_body.append(el)
+                for ref in el.iter(w("commentReference")):
+                    ex.keep_base(Comment(None, "", base_id=ref.get(w("id"))))
             return
         src = base_els[bi] if bi is not None and base_paras[bi].opaque is None \
             and etree.QName(base_els[bi]).localname == "p" else None

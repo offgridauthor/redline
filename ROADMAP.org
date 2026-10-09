@@ -15,7 +15,8 @@ Status: *done*, *partial*, or *not yet*.
 - *Moves* — partial. Word's moves (green double underline) come in as a deletion plus an insertion, so the "moved" pairing is lost. [M]
 - *Formatting changes* — partial. Italics and bold are editable and tracked. Underline, small caps, superscript, font, size, and highlight color are kept but not editable. Org has =_underline_= and =^{super}=, so those two are within reach; small caps has no org markup. [M]
 - *Other paragraph formatting* (a style switched to Block Text, indents, centering) — kept, not editable, not visible. [S to show the style name in the margin]
-- *Inside tables, footnotes, endnotes, headers, text boxes* — kept, not editable. Footnote text matters most for editing books. [L]
+- *Inside tables, footnotes, endnotes, headers, text boxes* — kept, not editable; whole tables and inline objects can be deleted or moved, tracked. Footnote text matters most for editing books. [L]
+- *Changing what a kept piece is* (a page break into a section break, a link's target) — not yet. Better as a small command that offers the choices than as text editing, since the text isn't what Word stores. [S–M]
 
 ** Comments
 
@@ -57,7 +58,7 @@ A "show invisibles" toggle could give each its own glyph, without changing the f
 - *Word count* without markup or deleted text, and *flyspell* that skips markup. [S]
 - *Other Emacs work in this area.* scimax (John Kitchin) has editmarks, its own track-changes markup for org ({>+ +<}, {>- -<}, {>~ ~<}, with an optional @author inside), with next/previous, accept/reject, a typo mark, and LaTeX export, but no Word round trip; its VS Code successor documents the same. Emacs's built-in =highlight-changes-mode= marks what changed since you turned it on, with next/previous, but keeps nothing in the file. obsidian.el edits an Obsidian vault from Emacs (links, tags, capture) and doesn't touch CriticMarkup, so redline-mode in markdown-mode would give Obsidian vault files the same review tools. [notes, no size]
 - *scimax interop.* redline.py could read and write editmarks as a second dialect (=--markup editmarks=), so a scimax user could send a manuscript to Word and back without changing tools, and redline-mode could step through editmarks the same way. The two markups map almost one to one; editmarks' tasks, typos, and colored highlights would come in as comments. Worth offering to John Kitchin before writing it, since scimax may prefer to call redline.py itself. [M]
-- *cm-mode upstream.* Report the RET problem (cm-mode edits the buffer from =before-change-functions=, and =newline='s cleanup then moves point a line back in org). redline works around it with =redline-newline=. [S]
+- *cm-mode upstream.* Report the RET problem (cm-mode edits the buffer from =before-change-functions=, and =newline='s cleanup then moves point a line back in org). redline works around it with =redline-newline=. Also report that =cm-markup-at-point= errors at the end of the buffer, which makes Emacs drop the tracking hook; redline guards it. [S]
 
 * Markdown
 

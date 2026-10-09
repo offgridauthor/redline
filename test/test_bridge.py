@@ -203,6 +203,43 @@ def test_paragraph_split_and_join(tmp):
     assert marks == ["ins", "del", "del"], marks
 
 
+def test_kept_block_moves(tmp):
+    """Deleting a table, or moving one, is a tracked change to the table itself."""
+    src = os.path.join(HERE, "..", "..", "..", "corpus", "pandoc", "test", "docx", "tables.docx")
+    if not os.path.exists(src):
+        doc = Document()
+        doc.add_paragraph("Before.")
+        t = doc.add_table(rows=2, cols=2)
+        t.cell(0, 0).text = "A"
+        t.cell(1, 1).text = "B"
+        doc.add_paragraph("Middle.")
+        t2 = doc.add_table(rows=1, cols=1)
+        t2.cell(0, 0).text = "C"
+        doc.add_paragraph("After.")
+        src = os.path.join(tmp, "tables.docx")
+        doc.save(src)
+    else:
+        import shutil
+        shutil.copy(src, tmp)
+        src = os.path.join(tmp, "tables.docx")
+    run("import", src, "--me", ME)
+    org = src[:-5] + ".org"
+    text = open(org, encoding="utf-8").read()
+    blocks = re.findall(r"(?m)^#\+docx_block:.*$", text)
+    first, second = blocks[0], blocks[1]
+    text = text.replace(first, "{--" + first + "--}{>>@SLW<<}", 1)        # delete
+    text = text.replace(second, "{--" + second + "--}{>>@SLW<<}", 1)      # move...
+    text = text.rstrip("\n") + "{++\n" + second + "++}{>>@SLW<<}\n"     # ...to the end, touching
+    open(org, "w", encoding="utf-8").write(text)
+    out = os.path.join(tmp, "tables-out.docx")
+    run("export", org, "-o", out, "--me", ME)
+    xml = zipfile.ZipFile(out).read("word/document.xml").decode()
+    assert "docx_block" not in xml
+    assert xml.count("<w:tbl>") == len(blocks) + 1
+    rows = re.findall(r"<w:trPr>(?:(?!</w:trPr>).)*<w:(ins|del) ", xml)
+    assert "ins" in rows and "del" in rows, rows
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):

@@ -188,6 +188,109 @@ written over."
                   (unless redline-word-tracking-on "--keep-settings"))
     (message "Wrote %s" (file-name-nondirectory out))))
 
+;;;; Kept objects: one piece each
+
+;; A link, field, footnote mark, or page break kept from Word shows as
+;; [[docx:12.0][text]], and a table as a "#+docx_block: 39 tbl" line.
+;; Their text can't change anything in Word, so it's read-only here;
+;; deleting, killing, or moving one takes the whole piece (tracked, when
+;; tracking is on), and export deletes, inserts, or moves the original.
+
+(defconst redline--unit-re
+  (concat "\\[\\[docx:[0-9]+\\.[0-9]+\\]\\(?:\\[[^]]*\\]\\)?\\]"
+          "\\|^\\(?:{\\(?:--\\|\\+\\+\\)\\)?\\(#\\+docx_block:[^{}\n]*\\)")
+  "A kept object, or (group 1) the text of a kept block's line.")
+
+(defconst redline--unit-message
+  "Kept from Word: delete or move it whole (its text can't be edited)"
+  "Shown when typing inside a kept object.")
+
+(defun redline--fontify-units (limit)
+  "Font-lock matcher: make the next kept piece before LIMIT read-only.
+Every character refuses insertion before it except the last, so
+typing right after a piece works but typing inside it doesn't."
+  (when (re-search-forward redline--unit-re limit t)
+    (let ((beg (or (match-beginning 1) (match-beginning 0)))
+          (end (or (match-end 1) (match-end 0))))
+      (add-text-properties beg end (list 'read-only redline--unit-message
+                                         'redline-unit (list beg)))  ; fresh per piece
+      (put-text-property (1- end) end 'rear-nonsticky '(read-only redline-unit)))
+    t))
+
+(defconst redline--unit-keywords
+  '((redline--fontify-units (0 nil)))
+  "Font-lock rule that makes kept pieces read-only.
+Font-lock, because cm-mode already lets font-lock manage the read-only
+property; anything set another way is wiped at the next redisplay.")
+
+(defun redline--protect-units (on)
+  "Make kept pieces read-only (ON non-nil), or editable again."
+  (if on
+      (progn
+        (font-lock-add-keywords nil redline--unit-keywords 'append)
+        (dolist (prop '(read-only redline-unit rear-nonsticky))
+          (add-to-list 'font-lock-extra-managed-props prop)))
+    (font-lock-remove-keywords nil redline--unit-keywords))
+  (font-lock-flush))
+
+(defun redline--unit-bounds (pos)
+  "Start and end of the kept piece covering POS, or nil."
+  (when-let* ((u (and (< pos (point-max)) (get-text-property pos 'redline-unit))))
+    (cons (if (and (> pos (point-min)) (eq (get-text-property (1- pos) 'redline-unit) u))
+              (previous-single-property-change pos 'redline-unit nil (point-min))
+            pos)
+          (next-single-property-change pos 'redline-unit nil (point-max)))))
+
+(defun redline--widen-to-units (beg end)
+  "BEG and END, pushed out to whole pieces at either edge, as a cons."
+  (let ((b (redline--unit-bounds beg))
+        (e (and (> end beg) (redline--unit-bounds (1- end)))))
+    (cons (if b (min beg (car b)) beg)
+          (if e (max end (cdr e)) end))))
+
+(defun redline--delete-char-around (orig n &optional killflag)
+  "Around `delete-char': delete a kept piece whole.
+ORIG, N, and KILLFLAG are the advised function and its arguments."
+  (let* ((beg (if (< n 0) (+ (point) n) (point)))
+         (end (if (< n 0) (point) (+ (point) n))))
+    (if (not (and (bound-and-true-p redline-mode)
+                  (<= (point-min) beg) (<= end (point-max))
+                  (progn (font-lock-ensure (line-beginning-position 0) (line-end-position 2))
+                         (text-property-not-all beg end 'redline-unit nil))))
+        (funcall orig n killflag)
+      (let* ((r (redline--widen-to-units beg end))
+             (inhibit-read-only t))
+        ;; Point where a backspace or a forward delete would leave it,
+        ;; so cm-mode records the deletion the same way.
+        (goto-char (if (< n 0) (cdr r) (car r)))
+        (if killflag (kill-region (car r) (cdr r)) (delete-region (car r) (cdr r)))))))
+
+(defun redline--kill-region-around (orig beg end &rest args)
+  "Around `kill-region': a kill that touches a kept piece takes all of it.
+ORIG, BEG, END, and ARGS are the advised function and its arguments."
+  (if (not (and (bound-and-true-p redline-mode) beg end
+                (progn (font-lock-ensure (min beg end) (max beg end))
+                       (text-property-not-all (min beg end) (max beg end) 'redline-unit nil))))
+      (apply orig beg end args)
+    (let ((r (redline--widen-to-units (min beg end) (max beg end)))
+          (inhibit-read-only t))
+      (apply orig (car r) (cdr r) args))))
+
+;;;; Typing at the end of the file
+
+;; cm-mode's `cm-markup-at-point' steps one character forward to decide
+;; between two kinds of markup, which fails at the end of the buffer.
+;; With tracking on, that error comes from a before-change hook, and
+;; Emacs then drops the hook for good: every later edit goes in
+;; untracked, with no message.  At the edges there's no markup to find.
+
+(defun redline--markup-at-point-safe (orig &rest args)
+  "Around `cm-markup-at-point': nil instead of an error at a buffer edge.
+ORIG and ARGS are the advised function and its arguments."
+  (condition-case nil
+      (apply orig args)
+    ((beginning-of-buffer end-of-buffer) nil)))
+
 ;;;; Asking when a .docx is opened
 
 (defun redline--find-file-ask (orig filename &rest args)
@@ -318,12 +421,17 @@ Tracked changes, comment threads, a review pane, margin tags, and
         ;; "<<}{>>" between two comments reads to org as a <<target>>.
         (face-remap-add-relative 'org-target '(:underline nil))
         (redline--quiet-org-targets t)
+        (redline--protect-units t)
+        (advice-add 'delete-char :around #'redline--delete-char-around)
+        (advice-add 'kill-region :around #'redline--kill-region-around)
+        (advice-add 'cm-markup-at-point :around #'redline--markup-at-point-safe)
         (redline-pane-setup)
         (when (and redline-track-changes-on-open
                    (redline-docx-file-p)
                    (not cm-follow-changes-mode))
           (cm-follow-changes-mode 1)))
     (redline--quiet-org-targets nil)
+    (redline--protect-units nil)
     (redline-pane-teardown)))
 
 (defconst redline--markup-re
