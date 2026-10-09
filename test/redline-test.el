@@ -94,6 +94,14 @@
       (should (equal (buffer-string)
                      "One two.\n\n* Head\n\nThree {++x++}{>>@SLW<<} four five.")))))
 
+(ert-deftest redline-test-tracked-paragraph-split ()
+  (redline-test-with "Zero here.\n\nOne. Two."
+    (cm-follow-changes-mode 1)
+    (search-forward "One. ")
+    (call-interactively (key-binding (kbd "RET")))
+    (call-interactively (key-binding (kbd "RET")))
+    (should (equal (buffer-string) "Zero here.\n\nOne. {++\n\n++}{>>@SLW<<}Two."))))
+
 (ert-deftest redline-test-reply-adds-to-thread ()
   (redline-test-with "X {==y==}{>>@Dana Should I?<<} z."
     (search-forward "Should")

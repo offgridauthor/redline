@@ -94,6 +94,12 @@ Client files are where every edit should show, the way Word's Track
 Changes would be on."
   :type 'boolean)
 
+(defcustom redline-word-tracking-on t
+  "Non-nil switches on Track Changes in the .docx you send back.
+The author's answers to your edits then show as tracked changes too.
+Nil leaves the switch as the original had it."
+  :type 'boolean)
+
 (defcustom redline-style-cm-faces t
   "Non-nil gives cm-mode's faces colors for light and dark themes."
   :type 'boolean)
@@ -178,10 +184,24 @@ written over."
     (user-error "No #+review_source: line; this file didn't come from a .docx"))
   (save-buffer)
   (let ((out (redline--fresh-name (file-name-sans-extension buffer-file-name))))
-    (redline--run "export" buffer-file-name "-o" out "--me" (redline--me))
+    (redline--run "export" buffer-file-name "-o" out "--me" (redline--me)
+                  (unless redline-word-tracking-on "--keep-settings"))
     (message "Wrote %s" (file-name-nondirectory out))))
 
 ;;;; The minor mode
+
+(declare-function org-return "org" (&optional indent arg interactive))
+
+(defun redline-newline ()
+  "Start a new line, tracked when follow-changes is on.
+With tracking on, a plain newline goes in.  `newline' (and org's RET,
+which calls it) would otherwise move point back a line once cm-mode
+has wrapped the newline in markup, so a second RET landed at the
+start of the paragraph.  With tracking off, this is org's RET."
+  (interactive)
+  (if (bound-and-true-p cm-follow-changes-mode)
+      (insert "\n")
+    (call-interactively (if (derived-mode-p 'org-mode) #'org-return #'newline))))
 
 (defvar-keymap redline-mode-map
   :doc "Keys for `redline-mode', beside cm-mode's own under C-c *."
@@ -192,7 +212,10 @@ written over."
   "C-c * k" #'redline-delete-comment
   "C-c * o" #'redline-import
   "C-c * w" #'redline-export
-  "<right-margin> <mouse-1>" #'redline-margin-click)
+  "<right-margin> <mouse-1>" #'redline-margin-click
+  "<remap> <org-return>" #'redline-newline
+  "<remap> <org-return-and-maybe-indent>" #'redline-newline
+  "<remap> <newline>" #'redline-newline)
 
 ;;;; Org targets
 
