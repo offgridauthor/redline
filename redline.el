@@ -188,6 +188,33 @@ written over."
                   (unless redline-word-tracking-on "--keep-settings"))
     (message "Wrote %s" (file-name-nondirectory out))))
 
+;;;; Asking when a .docx is opened
+
+(defun redline--find-file-ask (orig filename &rest args)
+  "Around `find-file': offer to review FILENAME in redline if it's a .docx.
+ORIG and ARGS are the advised function and its other arguments.
+Saying no opens the file the usual way (the document viewer)."
+  (if (and (not noninteractive)
+           (stringp filename)
+           (let ((case-fold-search t)) (string-match-p "\\.docx\\'" filename))
+           (file-regular-p filename)
+           (y-or-n-p (format "Open %s in redline, as org with its changes and comments? "
+                             (file-name-nondirectory filename))))
+      (redline-import filename)
+    (apply orig filename args)))
+
+;;;###autoload
+(define-minor-mode redline-ask-on-docx-mode
+  "Ask whether to review a .docx in redline when you open one.
+Covers \\[find-file] and its other-window and other-frame versions,
+and so dired's RET.  Saying no opens the file the usual way."
+  :global t
+  :group 'redline
+  (dolist (f '(find-file find-file-other-window find-file-other-frame))
+    (if redline-ask-on-docx-mode
+        (advice-add f :around #'redline--find-file-ask)
+      (advice-remove f #'redline--find-file-ask))))
+
 ;;;; The minor mode
 
 (declare-function org-return "org" (&optional indent arg interactive))

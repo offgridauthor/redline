@@ -135,6 +135,28 @@
     (should redline-mode)
     (should (string-suffix-p "{>>@SLW first note<<}" (buffer-string)))))
 
+(ert-deftest redline-test-ask-on-docx ()
+  (let* ((dir (make-temp-file "redline-ask" t))
+         (docx (expand-file-name "Client.DOCX" dir))
+         (txt (expand-file-name "notes.txt" dir))
+         imported (answer t) (noninteractive nil))
+    (unwind-protect
+        (progn
+          (write-region "x" nil docx) (write-region "x" nil txt)
+          (redline-ask-on-docx-mode 1)
+          (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) answer))
+                    ((symbol-function 'redline-import) (lambda (f) (setq imported f))))
+            (find-file docx)
+            (should (equal imported docx))   ; yes: into redline
+            (setq imported nil answer nil)
+            (let ((buf (find-file docx)))    ; no: the usual way
+              (should-not imported)
+              (kill-buffer buf))
+            (kill-buffer (find-file txt))    ; other files: no question
+            (should-not imported)))
+      (redline-ask-on-docx-mode -1)
+      (delete-directory dir t))))
+
 (ert-deftest redline-test-reply-adds-to-thread ()
   (redline-test-with "X {==y==}{>>@Dana Should I?<<} z."
     (search-forward "Should")

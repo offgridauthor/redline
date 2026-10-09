@@ -11,6 +11,7 @@ First release.
 - Changing a heading's level is a tracked style change.
 - Next and previous tracked change (=C-c * n= / =p=) and comment thread (=N= / =P=), like Word's Review tab, one stop per change and its comments.  =C-c * RET= / =DEL= accept or reject and move on.
 - =redline-command-map= holds the =C-c *= keys, so they can be bound in every buffer; each command turns =redline-mode= on if it's off.  =C-c * F= is now =redline-toggle-tracking=, which does the same and reports who you're tracking as.
+- =redline-ask-on-docx-mode=: opening a .docx asks whether to review it in redline.
 - Exported files have Word's Track Changes switched on (=redline-word-tracking-on=, =--keep-settings=).
 
 - Import a .docx as org with CriticMarkup, including comment threads, resolved comments, and inline objects.

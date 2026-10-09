@@ -56,6 +56,8 @@ The keys below live on =C-c *= once =redline-mode= is on. To have them in every 
 
 Any redline key then turns =redline-mode= on where it's pressed.
 
+=(redline-ask-on-docx-mode 1)= makes =C-x C-f= (and dired's =RET=) ask, for a .docx, whether to review it in redline; saying no opens it the usual way.
+
 Word labels each change with whatever name that copy of Word had for you, so earlier rounds of the same job can contain several versions of your name. List them in =redline-my-other-names= and changes under them come in as yours, with your tag, to revise as your own work. Each still goes back to Word under the name it was made with.
 
 =redline-maybe-enable= turns on =redline-mode= only in org files that came from a .docx or already contain CriticMarkup, so the rest of your org files stay as they are. Your initials come from =cm-author= (set it with =(setq-default cm-author "XYZ")= or =C-c * t=).
