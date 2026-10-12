@@ -62,6 +62,19 @@ Word labels each change with whatever name that copy of Word had for you, so ear
 
 =redline-maybe-enable= turns on =redline-mode= only in org files that came from a .docx or already contain CriticMarkup, so the rest of your org files stay as they are. Your initials come from =cm-author= (set it with =(setq-default cm-author "XYZ")= or =C-c * t=).
 
+** From the file manager
+
+=contrib/= has an "Open With" entry for Thunar, Nautilus, and other freedesktop file managers: right-click a .docx, choose *Emacs (redline review)*, and it opens in your running Emacs as org. It needs redline loaded at startup (=:demand t=) and an Emacs server (=server-start=). To install:
+
+#+begin_src sh
+mkdir -p ~/.local/bin ~/.local/share/applications
+chmod +x contrib/redline-open
+ln -sf "$PWD/contrib/redline-open" ~/.local/bin/redline-open
+sed "s|^Exec=redline-open|Exec=$HOME/.local/bin/redline-open|" contrib/redline.desktop \
+  > ~/.local/share/applications/redline.desktop
+update-desktop-database ~/.local/share/applications
+#+end_src
+
 * Keys
 
 cm-mode's own keys work as usual under =C-c *=: =F= turns tracking on and off, =i= accepts or rejects the change at point, =t= changes who you are. redline adds or improves:

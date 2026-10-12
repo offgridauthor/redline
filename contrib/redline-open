@@ -1,0 +1,11 @@
+#!/bin/sh
+# redline-open: open a Word file in Emacs for review with redline.
+# Used by redline.desktop (a file manager's "Open With" entry).  Hands the
+# file to the running Emacs through emacsclient; if no Emacs server is
+# running, starts Emacs with it instead.  Needs redline loaded at startup.
+[ -n "$1" ] || { echo "usage: redline-open FILE.docx" >&2; exit 2; }
+f=$(realpath -- "$1") || exit 1
+# Quote the path for an Emacs Lisp string: backslashes, then double quotes.
+q=$(printf '%s' "$f" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+form="(progn (select-frame-set-input-focus (selected-frame)) (redline-import \"$q\"))"
+emacsclient -n -e "$form" >/dev/null 2>&1 || exec emacs --eval "$form"

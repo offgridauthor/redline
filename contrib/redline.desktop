@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Emacs (redline review)
+GenericName=Review a Word file
+Comment=Open a .docx in Emacs as org, with its tracked changes and comments
+Exec=redline-open %f
+Icon=emacs
+Terminal=false
+NoDisplay=true
+MimeType=application/vnd.openxmlformats-officedocument.wordprocessingml.document;
+Categories=Office;TextEditor;
